@@ -1,0 +1,40 @@
+[project]
+name = "contindi"
+version = "0.0.1"
+description = "CONtrol of Telescopes using INDI"
+readme = "README.md"
+authors = [{name = "Dar Dahlen", email = "dardahlen@gmail.com"}]
+license = {text = "MIT"}
+requires-python = ">=3.9"
+classifiers=["Programming Language :: Python :: 3"]
+dependencies = ["astropy>=5.3.4"]
+
+[project.urls]
+homepage = "https://github.com/dahlend/contindi"
+
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[project.optional-dependencies]
+dev = ["black>=23.1.0",
+       "sphinx",
+       "autodoc",
+       "sphinx-gallery",
+       "mypy",]
+
+# See https://github.com/psf/black/blob/main/pyproject.toml for more details
+[tool.black]
+line-length = 88
+target_version = ["py39"]
+exclude = '''
+(
+  /(
+      \.eggs         # exclude a few common directories in the
+    | \.git          # root of the project
+  )/
+)
+'''
