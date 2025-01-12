@@ -5,17 +5,44 @@ import time
 from abc import abstractmethod, ABC
 
 
-class ConstraintStatus(Enum):
-    Satisfied = True
-    NotSatisfied = False
-    Unsatisfiable = None
-
-
 class EventStatus(Enum):
-    Running = 1
-    Canceling = 2
-    Canceled = 3
-    Finished = 4
+    NotReady = 0
+    Ready = 1
+    Running = 2
+    Finished = 3
+    Canceling = 4
+    Failed = 5
+
+    @property
+    def is_done(self) -> bool:
+        return self in [EventStatus.Finished, EventStatus.Failed]
+
+    @property
+    def is_active(self) -> bool:
+        return self in [EventStatus.Running, EventStatus.Canceling]
+
+    @property
+    def is_started(self) -> bool:
+        return self not in [EventStatus.Ready, EventStatus.NotReady]
+
+    @property
+    def next(self) -> EventStatus:
+        """
+        Status is essentially a state machine, this allows for an advancement
+        of the status states.
+        """
+        if self == EventStatus.NotReady:
+            return EventStatus.Ready
+        elif self == EventStatus.Ready:
+            return EventStatus.Running
+        elif self == EventStatus.Running:
+            return EventStatus.Finished
+        elif self == EventStatus.Finished:
+            return EventStatus.Finished
+        elif self == EventStatus.Canceling:
+            return EventStatus.Failed
+        elif self == EventStatus.Failed:
+            return EventStatus.Failed
 
 
 @dataclasses.dataclass
@@ -26,10 +53,6 @@ class Event(ABC):
 
     Higher priority events are run first.
 
-    Events will always be checked to see if their constraints are satisfied before
-    triggering the beginning of the event.
-    After triggering, constraints will no longer be checked, but the `check` method
-    will be called to check the status of the event.
     If an event needs to be canceled while running, the `cancel` method will be called.
     """
 
@@ -42,7 +65,7 @@ class Event(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def check(self) -> EventStatus:
+    def status(self) -> EventStatus:
         """Check the status of the event."""
         raise NotImplementedError()
 
@@ -51,16 +74,34 @@ class Event(ABC):
         """Trigger the beginning of the event."""
         raise NotImplementedError()
 
-    @abstractmethod
-    def check_constraints(self) -> ConstraintStatus:
-        """
-        Are the constraints for the event currently satisfied.
-        IE: If we trigger the event now is it ok to run.
-        """
-        raise NotImplementedError()
-
     def __lt__(self, other):
         return self.priority < other.priority
+
+
+class SeriesEvent(Event):
+    def __init__(self, priority: int, event_list: list[Event]):
+        self.priority = priority
+        self.event_list = event_list
+        if len(self.event_list) == 0:
+            raise ValueError("Cannot create event with no contents.")
+        self.current = self.event_list.pop(0)
+
+    def cancel(self):
+        if self.current is not None:
+            return self.current.cancel()
+
+    def trigger(self):
+        self.current.trigger()
+
+    def status(self):
+        status = self.current.status()
+        if status == EventStatus.Finished:
+            if len(self.event_list) == 0:
+                return status
+            self.current = self.event_list.pop(0)
+            self.current.trigger()
+            return self.current.status()
+        return status
 
 
 class Scheduler:
@@ -71,54 +112,38 @@ class Scheduler:
     highest priority one which has its constraints satisfied. This event is run and
     the scheduler waits for completion of the event before repeating the process.
 
-    Only one event is ever active at a time, if an event is active it is removed from
-    the event list.
+    Only one event is ever active at a time.
     """
 
-    def __init__(self, poll_rate=0.1):
+    def __init__(self):
         self.event_list = []
-        self.current_event = None
-        self.poll_rate = poll_rate
+        self.poll_rate = 1
 
     def add_event(self, event: Event):
-        """
-        Add a new event to the schedule.
-        """
+        status = event.status()
+        if status.is_started:
+            raise ValueError("This event has already happened.")
         self.event_list.append(event)
+        self.event_list.sort()
 
-    def check(self):
-        """
-        Check the status of current running event, or start a new event if possible.
-
-        Events which are running are removed from the event list.
-
-        If the current event is not running, sorts the event list by priority, and
-        trigger the next event which is possible.
-        """
-        if self.current_event is not None:
-            status = self.current_event.check()
-            if status == EventStatus.Running or status == EventStatus.Canceling:
-                return
-            else:
-                self.current_event = None
-        self.event_list.sort(reverse=True)
+    def poll(self):
         keep = []
+        trigger = None
         for event in self.event_list:
-            constraint = event.check_constraints()
-            if constraint == ConstraintStatus.Satisfied and self.current_event is None:
-                self.current_event = event
-                self.current_event.trigger()
-            elif constraint == ConstraintStatus.NotSatisfied:
+            status = event.status()
+            if not status.is_done:
                 keep.append(event)
+                if trigger is None and status == EventStatus.Ready:
+                    trigger = event
         self.event_list = keep
 
+        if trigger is not None:
+            trigger.trigger()
+
     def run(self):
-        """
-        Run the scheduler forever, running the check function at regular intervals.
-        """
         while True:
             try:
-                self.check()
+                self.poll()
                 time.sleep(self.poll_rate)
             except KeyboardInterrupt:
                 return
