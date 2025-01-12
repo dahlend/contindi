@@ -151,7 +151,6 @@ class Connection:
         By default INDI cameras do not send the images to new connections, this
         sends a command to inform the INDI server it should also send images here.
 
-
         Parameters
         ----------
         devs:
