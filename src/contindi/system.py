@@ -1,6 +1,7 @@
 from collections import defaultdict
 import socket
 import select
+import signal
 import multiprocessing
 import copy
 import logging
@@ -174,6 +175,10 @@ class Connection:
         """
         Threaded process which keeps track of the server connection and data packets.
         """
+        # Ignore interrupt signals
+        # this allows keyboard interrupts to run without issue
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
         partial = ""
         chunks = []
         state = State()
