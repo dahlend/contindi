@@ -95,8 +95,8 @@ class Connection:
 
         self.task_queue = multiprocessing.Queue()
         self.response_queue = multiprocessing.Queue()
-        self.connect()
         self.process = None
+        self.connect()
 
     def connect(self):
         if self.process is not None and self.is_connected:

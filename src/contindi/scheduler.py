@@ -1,8 +1,16 @@
 import dataclasses
 from collections.abc import Callable
 from enum import Enum
+import multiprocessing
+import signal
+import logging
+from queue import Empty
 import time
 from abc import abstractmethod, ABC
+from .system import Connection
+
+
+logger = logging.getLogger(__name__)
 
 
 class EventStatus(Enum):
@@ -26,7 +34,7 @@ class EventStatus(Enum):
         return self not in [EventStatus.Ready, EventStatus.NotReady]
 
     @property
-    def next(self) -> EventStatus:
+    def next(self) -> "EventStatus":
         """
         Status is essentially a state machine, this allows for an advancement
         of the status states.
@@ -60,17 +68,17 @@ class Event(ABC):
     """Priority of the event."""
 
     @abstractmethod
-    def cancel(self) -> EventStatus:
+    def cancel(self, cxn: Connection) -> EventStatus:
         """Cancel the running event."""
         raise NotImplementedError()
 
     @abstractmethod
-    def status(self) -> EventStatus:
+    def status(self, cxn: Connection) -> EventStatus:
         """Check the status of the event."""
         raise NotImplementedError()
 
     @abstractmethod
-    def trigger(self):
+    def trigger(self, cxn: Connection):
         """Trigger the beginning of the event."""
         raise NotImplementedError()
 
@@ -86,21 +94,21 @@ class SeriesEvent(Event):
             raise ValueError("Cannot create event with no contents.")
         self.current = self.event_list.pop(0)
 
-    def cancel(self):
+    def cancel(self, cxn: Connection):
         if self.current is not None:
-            return self.current.cancel()
+            return self.current.cancel(cxn)
 
-    def trigger(self):
-        self.current.trigger()
+    def trigger(self, cxn: Connection):
+        self.current.trigger(cxn)
 
-    def status(self):
-        status = self.current.status()
+    def status(self, cxn: Connection):
+        status = self.current.status(cxn)
         if status == EventStatus.Finished:
             if len(self.event_list) == 0:
                 return status
             self.current = self.event_list.pop(0)
-            self.current.trigger()
-            return self.current.status()
+            self.current.trigger(cxn)
+            return self.current.status(cxn)
         return status
 
 
@@ -115,35 +123,101 @@ class Scheduler:
     Only one event is ever active at a time.
     """
 
-    def __init__(self):
-        self.event_list = []
-        self.poll_rate = 1
+    timeout = 10
+
+    def __init__(self, host="localhost", port=7624):
+        """
+        Parameters
+        ----------
+        host:
+            Host address for the INDI server, defaults to `localhost`.
+        port:
+            Port number of the INDI server, defaults to 7624.
+        """
+        self.host = (host, port)
+
+        self.task_queue = multiprocessing.Queue()
+        self.response_queue = multiprocessing.Queue()
+        self.process = None
+        self.connect()
+
+    def connect(self):
+        if self.is_connected:
+            # already connected
+            return
+        elif self.process is not None:
+            del self.process
+        self.process = multiprocessing.Process(
+            target=self._process_tasks,
+            args=(self.task_queue, self.response_queue, self.host),
+        )
+        # Ensures process exits when main program ends
+        self.process.start()
+    
+    @property
+    def is_connected(self):
+        if self.process is None:
+            return False
+        return self.process.is_alive()
+
+    @staticmethod
+    def _process_tasks(task_queue: multiprocessing.Queue, response_queue, host):
+        """
+        Threaded process which keeps track of the server connection and data packets.
+        """
+        # Ignore interrupt signals
+        # this allows keyboard interrupts to run without issue
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        event_list = []
+        cxn = Connection(*host)
+
+        while True:
+            # Get new commands from queue
+            try:
+                cmd, value = task_queue.get_nowait()
+                if cmd == "stop":
+                    break
+                elif cmd == "event":
+                    if not isinstance(value, Event):
+                        logger.error("Submitted object is not an Event, ignoring it %s", str(value))
+                        continue
+                    status = value.status(cxn)
+                    if status.is_started:
+                        logger.error("This event has already happened, ignoring it")
+                        continue
+                    event_list.append(event)
+                    event_list.sort()
+                else:
+                    logger.error("Unkown Command")
+            except Empty:
+                pass
+
+            keep = []
+            trigger = None
+            for event in event_list:
+                status = event.status(cxn)
+                if not status.is_done:
+                    keep.append(event)
+                    if trigger is None and status == EventStatus.Ready:
+                        trigger = event
+            event_list = keep
+
+            if trigger is not None:
+                trigger.trigger(cxn)
+
+        logger.error("Closing Connection!")
+        cxn.close()
 
     def add_event(self, event: Event):
-        status = event.status()
-        if status.is_started:
-            raise ValueError("This event has already happened.")
-        self.event_list.append(event)
-        self.event_list.sort()
+        self.task_queue.put(("event", event))
+    
+    def close(self):
+        """
+        Close the connection.
+        """
+        self.task_queue.put(("stop", None))
+        self.process.terminate()
 
-    def poll(self):
-        keep = []
-        trigger = None
-        for event in self.event_list:
-            status = event.status()
-            if not status.is_done:
-                keep.append(event)
-                if trigger is None and status == EventStatus.Ready:
-                    trigger = event
-        self.event_list = keep
-
-        if trigger is not None:
-            trigger.trigger()
-
-    def run(self):
-        while True:
-            try:
-                self.poll()
-                time.sleep(self.poll_rate)
-            except KeyboardInterrupt:
-                return
+    def __del__(self):
+        self.close()
