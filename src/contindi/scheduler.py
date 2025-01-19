@@ -64,6 +64,9 @@ class Event(ABC):
     If an event needs to be canceled while running, the `cancel` method will be called.
     """
 
+    name: str
+    """Name of the event."""
+
     priority: int
     """Priority of the event."""
 
@@ -87,7 +90,8 @@ class Event(ABC):
 
 
 class SeriesEvent(Event):
-    def __init__(self, priority: int, event_list: list[Event]):
+    def __init__(self, name: str, priority: int, event_list: list[Event]):
+        self.name = name
         self.priority = priority
         self.event_list = event_list
         if len(self.event_list) == 0:
@@ -153,7 +157,7 @@ class Scheduler:
         )
         # Ensures process exits when main program ends
         self.process.start()
-    
+
     @property
     def is_connected(self):
         if self.process is None:
@@ -171,6 +175,7 @@ class Scheduler:
 
         event_list = []
         cxn = Connection(*host)
+        running = None
 
         while True:
             # Get new commands from queue
@@ -178,15 +183,25 @@ class Scheduler:
                 cmd, value = task_queue.get_nowait()
                 if cmd == "stop":
                     break
+                elif cmd == "status":
+                    if running is not None:
+                        logging.warning("%s Running", running.name)
+                    if len(event_list) > 0:
+                        logging.warning("%s remaining in queue", len(event_list))
+                    else:
+                        logging.warning("Waiting for new jobs")
                 elif cmd == "event":
                     if not isinstance(value, Event):
-                        logger.error("Submitted object is not an Event, ignoring it %s", str(value))
+                        logger.error(
+                            "Submitted object is not an Event, ignoring it %s",
+                            str(value),
+                        )
                         continue
                     status = value.status(cxn)
                     if status.is_started:
                         logger.error("This event has already happened, ignoring it")
                         continue
-                    event_list.append(event)
+                    event_list.append(value)
                     event_list.sort()
                 else:
                     logger.error("Unkown Command")
@@ -195,15 +210,20 @@ class Scheduler:
 
             keep = []
             trigger = None
+            running = None
             for event in event_list:
                 status = event.status(cxn)
+                logger.debug("%s - %s", event.name, str(status))
+                if status.is_active:
+                    running = event
                 if not status.is_done:
                     keep.append(event)
                     if trigger is None and status == EventStatus.Ready:
                         trigger = event
             event_list = keep
 
-            if trigger is not None:
+            if running is None and trigger is not None:
+                logger.debug("%s - Trigger", trigger.name)
                 trigger.trigger(cxn)
 
         logger.error("Closing Connection!")
@@ -211,7 +231,10 @@ class Scheduler:
 
     def add_event(self, event: Event):
         self.task_queue.put(("event", event))
-    
+
+    def status(self):
+        self.task_queue.put(("status", None))
+
     def close(self):
         """
         Close the connection.
