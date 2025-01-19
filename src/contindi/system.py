@@ -96,8 +96,13 @@ class Connection:
         self.task_queue = multiprocessing.Queue()
         self.response_queue = multiprocessing.Queue()
         self.connect()
+        self.process = None
 
     def connect(self):
+        if self.process is not None and self.is_connected:
+            return
+        elif self.process is not None:
+            del self.process
         self.process = multiprocessing.Process(
             target=self._process_tasks,
             args=(self.task_queue, self.response_queue, self.host),
@@ -123,6 +128,8 @@ class Connection:
 
     @property
     def is_connected(self):
+        if self.process is None:
+            return False
         return self.process.is_alive()
 
     def close(self):
@@ -331,8 +338,7 @@ class Connection:
         return f"Connection(devices={devices})"
 
     def __getitem__(self, key):
-        state = self.state
-        return state[key]
+        return self.state[key]
 
     def __del__(self):
         self.close()
