@@ -26,6 +26,13 @@ class TextVector(GenericVector):
             elem.text = str(new_value)
         return ET.tostring(cmd).decode()
 
+    def is_set(self, *args, **kwargs):
+        kwargs = super().create_xml_command(*args, **kwargs)
+        for name, val in kwargs.items():
+            if self.elements[name].value != val:
+                return False
+        return True
+
     @classmethod
     def from_xml(cls, xml_element):
         attribs = cls._parse_xml_element(xml_element)

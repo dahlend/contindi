@@ -129,6 +129,10 @@ class GenericVector(NamedInfo, ABC):
     def update_from_xml(self, xml_element):
         raise NotImplementedError()
 
+    @abstractmethod
+    def is_set(self, *args, **kwargs):
+        raise NotImplementedError()
+
     def create_xml_command(self, *args, **kwargs):
         new_kwargs = {}
         elem_names = list(self.elements.keys())

@@ -13,10 +13,28 @@ class SwitchRule(Enum):
     AtMostOne = "AtMostOne"
     AnyOfMany = "AnyOfMany"
 
+    @staticmethod
+    def from_str(val):
+        if str(val).lower().strip() == "oneofmany":
+            return SwitchRule.OneOfMany
+        elif str(val).lower().strip() == "atmostone":
+            return SwitchRule.AtMostOne
+        elif str(val).lower().strip() == "anyofmany":
+            return SwitchRule.AnyOfMany
+        raise ValueError("Cannot convert string to SwitchRule.")
+
 
 class SwitchState(Enum):
     On = "On"
     Off = "Off"
+
+    @staticmethod
+    def from_str(val):
+        if str(val).lower().strip() == "on":
+            return SwitchState.On
+        elif str(val).lower().strip() == "off":
+            return SwitchState.Off
+        raise ValueError("Cannot convert string to SwitchState.")
 
 
 @dataclasses.dataclass
@@ -71,6 +89,13 @@ class SwitchVector(GenericVector):
             elem = ET.SubElement(cmd, "oneSwitch", name=elem_name)
             elem.text = new_value
         return ET.tostring(cmd).decode()
+
+    def is_set(self, *args, **kwargs):
+        kwargs = super().create_xml_command(*args, **kwargs)
+        for name, val in kwargs.items():
+            if self.elements[name].value != SwitchState.from_str(val):
+                return False
+        return True
 
     @classmethod
     def from_xml(cls, xml_element):

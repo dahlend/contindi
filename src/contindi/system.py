@@ -95,6 +95,9 @@ class Connection:
 
         self.task_queue = multiprocessing.Queue()
         self.response_queue = multiprocessing.Queue()
+        self.connect()
+
+    def connect(self):
         self.process = multiprocessing.Process(
             target=self._process_tasks,
             args=(self.task_queue, self.response_queue, self.host),
@@ -102,9 +105,16 @@ class Connection:
         # Ensures process exits when main program ends
         self.process.daemon = True
         self.process.start()
-        self.set_camera_recv()
 
-    def set_value(self, dev_name: str, property_name: str, *args, **kwargs):
+    def set_value(
+        self,
+        dev_name: str,
+        property_name: str,
+        block=True,
+        timeout=None,
+        *args,
+        **kwargs,
+    ):
         """
         Set parameters on devices which are currently connected.
 
@@ -120,6 +130,7 @@ class Connection:
         property_name:
             Name of the property to set on the device.
         """
+        timeout = timeout if timeout is not None else self.timeout
         state = self.state
 
         if dev_name not in state:
@@ -145,6 +156,15 @@ class Connection:
             return None
         self.task_queue.put("send " + cmd)
 
+        if block:
+            t = time.time()
+            while (time.time() - t) < timeout:
+                state = self.state
+                if state[dev_name][property_name].is_set(*args, **kwargs):
+                    return None
+
+            raise ValueError("Timeout. Failed to set value in time.")
+
     def set_camera_recv(self, devs=None, send_here="Also"):
         """
         Set the camera(s) of the system to send images to this connection.
@@ -166,7 +186,7 @@ class Connection:
             devs = set([d[0] for d in cameras])
         for dev in devs:
             cmd = ET.Element("enableBLOB", device=dev)
-            cmd.text = send_here
+            cmd.text = str(send_here).capitalize()
             cmd = ET.tostring(cmd)
             self.task_queue.put("send " + cmd.decode())
 
@@ -284,7 +304,7 @@ class Connection:
         """
         Current state of all devices found.
         """
-        if not self.process.is_alive():
+        if not self.is_connected:
             raise ValueError("Connection is closed.")
         self.task_queue.put("get state")
         state = self.response_queue.get(timeout=self.timeout)
@@ -293,6 +313,19 @@ class Connection:
                 state = self.response_queue.get_nowait()
             except Empty:
                 return state
+
+    @property
+    def is_connected(self):
+        return self.process.is_alive()
+
+    def __repr__(self):
+        conn = self.is_connected
+        devices = "" if not conn else str(list(self.state.keys()))
+        return f"Connection(devices={devices})"
+
+    def __getitem__(self, key):
+        state = self.state
+        return state[key]
 
     def close(self):
         """

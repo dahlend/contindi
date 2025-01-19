@@ -21,6 +21,34 @@ class NumberElement:
 class NumberVector(GenericVector):
     elements: dict[NumberElement]
 
+    @property
+    def value(self):
+        return [v.value for v in self.elements.values()]
+
+    @property
+    def min(self):
+        return [v.min for v in self.elements.values()]
+
+    @property
+    def max(self):
+        return [v.max for v in self.elements.values()]
+
+    @property
+    def step(self):
+        return [v.step for v in self.elements.values()]
+
+    @property
+    def format(self):
+        return [v.format for v in self.elements.values()]
+
+    @property
+    def element_name(self):
+        return [v.name for v in self.elements.values()]
+
+    @property
+    def element_label(self):
+        return [v.label for v in self.elements.values()]
+
     def create_xml_command(self, *args, **kwargs):
         kwargs = super().create_xml_command(*args, **kwargs)
 
@@ -40,6 +68,13 @@ class NumberVector(GenericVector):
             elem = ET.SubElement(cmd, "oneNumber", name=elem_name)
             elem.text = str(new_value)
         return ET.tostring(cmd).decode()
+
+    def is_set(self, *args, **kwargs):
+        kwargs = super().create_xml_command(*args, **kwargs)
+        for name, val in kwargs.items():
+            if abs(self.elements[name].value - val) > 1e-4:
+                return False
+        return True
 
     @classmethod
     def from_xml(cls, xml_element):

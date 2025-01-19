@@ -37,6 +37,9 @@ class BlobVector(GenericVector):
     def create_xml_command(self, param_name, new_value):
         pass
 
+    def is_set(self, *args, **kwargs):
+        return True
+
     @classmethod
     def from_xml(cls, xml_element):
         attribs = cls._parse_xml_element(xml_element)
