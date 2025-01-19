@@ -34,7 +34,14 @@ class Blob:
 class BlobVector(GenericVector):
     elements: dict[Blob]
 
-    def create_xml_command(self, param_name, new_value):
+    @property
+    def frame(self):
+        frames = [e.frame for e in self.elements.values()]
+        if len(self.elements) == 0:
+            return frames[0]
+        return frames
+
+    def create_xml_command(self, *args, **kwargs):
         pass
 
     def is_set(self, *args, **kwargs):

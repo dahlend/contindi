@@ -26,20 +26,19 @@ This is NOT an INDI server, this does not do any schedule management.
     cxn.set_value("Telescope", "EQUATORIAL_EOD_COORD", RA=15, DEC=10)
 
     # Abort!
-    cxn.set_value("Telescope", "TELESCOPE_ABORT_MOTION", "on")
+    cxn.set_value("Telescope", "TELESCOPE_ABORT_MOTION", "on", block=False)
 
     # Command a 1 second exposure
-    cxn.set_value("CCD", "CCD_EXPOSURE", 1.0)
     # This is not a blocking operation, so you will have to wait a second
+    cxn.set_value("CCD", "CCD_EXPOSURE", 1.0, block=False)
 
     import time
     time.sleep(1.5)
 
     # Get the last frame recieved
-    # This is a bit messy, but is mostly how INDI is structured.
     # In this case, if the format is a FITs file, it is automatically made into
     # an astropy FITS object. Otherwise the raw bytes are returned.
-    cxn.state["CCD"]["CCD1"].elements["CCD1"].frame
+    cxn.state['CCD']['CCD1'].frame
 ```
 
 ## Technical Details

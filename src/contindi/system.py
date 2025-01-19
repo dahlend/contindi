@@ -110,9 +110,9 @@ class Connection:
         self,
         dev_name: str,
         property_name: str,
+        *args,
         block=True,
         timeout=None,
-        *args,
         **kwargs,
     ):
         """
@@ -147,7 +147,7 @@ class Connection:
         if len(args) == 0 and len(kwargs) == 0:
             raise ValueError(
                 "No properties are specified, try one of: \n%s",
-                state[dev_name].to_string(),
+                list(state[dev_name].keys()),
             )
 
         param = state[dev_name][property_name]
