@@ -7,7 +7,7 @@ This is a pure python implementation of the INDI standard:
 http://docs.indilib.org/protocol/INDI.pdf
 
 A very simple INDI client to connect to a telescope without a GUI.
-This is NOT an INDI server, this does not do any schedule management.
+This is NOT an INDI server.
 
 ``` python
 

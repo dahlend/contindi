@@ -106,6 +106,32 @@ class Connection:
         self.process.daemon = True
         self.process.start()
 
+    @property
+    def state(self) -> State:
+        """
+        Current state of all devices found.
+        """
+        if not self.is_connected:
+            raise ValueError("Connection is closed.")
+        self.task_queue.put("get state")
+        state = self.response_queue.get(timeout=self.timeout)
+        while True:
+            try:
+                state = self.response_queue.get_nowait()
+            except Empty:
+                return state
+
+    @property
+    def is_connected(self):
+        return self.process.is_alive()
+
+    def close(self):
+        """
+        Close the connection.
+        """
+        self.task_queue.put("stop")
+        self.process.terminate()
+
     def set_value(
         self,
         dev_name: str,
@@ -299,25 +325,6 @@ class Connection:
         logger.error("Closing Connection!")
         cxn.close()
 
-    @property
-    def state(self) -> State:
-        """
-        Current state of all devices found.
-        """
-        if not self.is_connected:
-            raise ValueError("Connection is closed.")
-        self.task_queue.put("get state")
-        state = self.response_queue.get(timeout=self.timeout)
-        while True:
-            try:
-                state = self.response_queue.get_nowait()
-            except Empty:
-                return state
-
-    @property
-    def is_connected(self):
-        return self.process.is_alive()
-
     def __repr__(self):
         conn = self.is_connected
         devices = "" if not conn else str(list(self.state.keys()))
@@ -326,13 +333,6 @@ class Connection:
     def __getitem__(self, key):
         state = self.state
         return state[key]
-
-    def close(self):
-        """
-        Close the connection.
-        """
-        self.task_queue.put("stop")
-        self.process.terminate()
 
     def __del__(self):
         self.close()
