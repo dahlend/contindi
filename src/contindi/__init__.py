@@ -10,7 +10,3 @@ __all__ = [
     "State",
     "Scheduler",
 ]
-
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)

@@ -108,9 +108,13 @@ class SeriesEvent(Event):
     def status(self, cxn: Connection):
         status = self.current.status(cxn)
         if status == EventStatus.Finished:
+            logger.info(
+                "%s - %s - Finished with %s", self.name, self.current.name, str(status)
+            )
             if len(self.event_list) == 0:
                 return status
             self.current = self.event_list.pop(0)
+            logger.info("%s - %s - Trigger", self.name, self.current.name)
             self.current.trigger(cxn)
             return self.current.status(cxn)
         return status
@@ -164,6 +168,22 @@ class Scheduler:
             return False
         return self.process.is_alive()
 
+    def add_event(self, event: Event):
+        self.task_queue.put(("event", event))
+
+    def status(self):
+        self.task_queue.put(("status", None))
+
+    def cancel(self):
+        self.task_queue.put(("clear", None))
+
+    def close(self):
+        """
+        Close the connection.
+        """
+        self.task_queue.put(("stop", None))
+        self.process.terminate()
+
     @staticmethod
     def _process_tasks(task_queue: multiprocessing.Queue, response_queue, host):
         """
@@ -178,18 +198,34 @@ class Scheduler:
         running = None
 
         while True:
+            # if there is nothing to do, chill for bit.
+            if len(event_list) == 0 and task_queue.empty():
+                time.sleep(0.05)
+
             # Get new commands from queue
-            try:
+            while not task_queue.empty():
+                # Get the next command and possibly event
                 cmd, value = task_queue.get_nowait()
+
                 if cmd == "stop":
-                    break
+                    logger.error("Closing Connection!")
+                    cxn.close()
+                    return
+                elif cmd == "clear":
+                    logger.warning("Clearing event list, %s removed ", len(event_list))
+                    if running is not None:
+                        logger.warning("%s Cancelling", running.name)
+                        running.cancel(cxn)
+                        event_list = [running]
+                    else:
+                        event_list = []
                 elif cmd == "status":
                     if running is not None:
-                        logging.warning("%s Running", running.name)
+                        logger.warning("%s Running", running.name)
                     if len(event_list) > 0:
-                        logging.warning("%s remaining in queue", len(event_list))
+                        logger.warning("%s remaining in queue", len(event_list))
                     else:
-                        logging.warning("Waiting for new jobs")
+                        logger.warning("Waiting for new jobs")
                 elif cmd == "event":
                     if not isinstance(value, Event):
                         logger.error(
@@ -205,8 +241,6 @@ class Scheduler:
                     event_list.sort()
                 else:
                     logger.error("Unkown Command")
-            except Empty:
-                pass
 
             keep = []
             trigger = None
@@ -220,27 +254,16 @@ class Scheduler:
                     keep.append(event)
                     if trigger is None and status == EventStatus.Ready:
                         trigger = event
+                else:
+                    logger.info("%s - Finished with %s", event.name, str(status))
             event_list = keep
 
             if running is None and trigger is not None:
-                logger.debug("%s - Trigger", trigger.name)
+                logger.info("%s - Triggered", trigger.name)
                 trigger.trigger(cxn)
 
         logger.error("Closing Connection!")
         cxn.close()
-
-    def add_event(self, event: Event):
-        self.task_queue.put(("event", event))
-
-    def status(self):
-        self.task_queue.put(("status", None))
-
-    def close(self):
-        """
-        Close the connection.
-        """
-        self.task_queue.put(("stop", None))
-        self.process.terminate()
 
     def __del__(self):
         self.close()
