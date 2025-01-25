@@ -8,6 +8,7 @@ from queue import Empty
 import time
 from abc import abstractmethod, ABC
 from .system import Connection
+from .cache import Cache
 
 
 logger = logging.getLogger(__name__)
@@ -71,17 +72,17 @@ class Event(ABC):
     """Priority of the event."""
 
     @abstractmethod
-    def cancel(self, cxn: Connection) -> EventStatus:
+    def cancel(self, cxn: Connection, cache: Cache) -> EventStatus:
         """Cancel the running event."""
         raise NotImplementedError()
 
     @abstractmethod
-    def status(self, cxn: Connection) -> EventStatus:
+    def status(self, cxn: Connection, cache: Cache) -> EventStatus:
         """Check the status of the event."""
         raise NotImplementedError()
 
     @abstractmethod
-    def trigger(self, cxn: Connection):
+    def trigger(self, cxn: Connection, cache: Cache):
         """Trigger the beginning of the event."""
         raise NotImplementedError()
 
@@ -98,15 +99,15 @@ class SeriesEvent(Event):
             raise ValueError("Cannot create event with no contents.")
         self.current = self.event_list.pop(0)
 
-    def cancel(self, cxn: Connection):
+    def cancel(self, cxn: Connection, cache: Cache):
         if self.current is not None:
-            return self.current.cancel(cxn)
+            return self.current.cancel(cxn, cache)
 
-    def trigger(self, cxn: Connection):
-        self.current.trigger(cxn)
+    def trigger(self, cxn: Connection, cache: Cache):
+        self.current.trigger(cxn, cache)
 
-    def status(self, cxn: Connection):
-        status = self.current.status(cxn)
+    def status(self, cxn: Connection, cache: Cache):
+        status = self.current.status(cxn, cache)
         if status == EventStatus.Finished:
             logger.info(
                 "%s - %s - Finished with %s", self.name, self.current.name, str(status)
@@ -115,8 +116,8 @@ class SeriesEvent(Event):
                 return status
             self.current = self.event_list.pop(0)
             logger.info("%s - %s - Trigger", self.name, self.current.name)
-            self.current.trigger(cxn)
-            return self.current.status(cxn)
+            self.current.trigger(cxn, cache)
+            return self.current.status(cxn, cache)
         return status
 
 
@@ -133,7 +134,7 @@ class Scheduler:
 
     timeout = 10
 
-    def __init__(self, host="localhost", port=7624):
+    def __init__(self, host="localhost", port=7624, cache_path=None):
         """
         Parameters
         ----------
@@ -141,12 +142,15 @@ class Scheduler:
             Host address for the INDI server, defaults to `localhost`.
         port:
             Port number of the INDI server, defaults to 7624.
+        cache_path:
+            File where the cache should be, if `None`, no cache will be used.
         """
         self.host = (host, port)
 
         self.task_queue = multiprocessing.Queue()
         self.response_queue = multiprocessing.Queue()
         self.process = None
+        self.cache_path = cache_path
         self.connect()
 
     def connect(self):
@@ -157,7 +161,7 @@ class Scheduler:
             del self.process
         self.process = multiprocessing.Process(
             target=self._process_tasks,
-            args=(self.task_queue, self.response_queue, self.host),
+            args=(self.task_queue, self.response_queue, self.host, self.cache_path),
         )
         # Ensures process exits when main program ends
         self.process.start()
@@ -185,7 +189,9 @@ class Scheduler:
         self.process.terminate()
 
     @staticmethod
-    def _process_tasks(task_queue: multiprocessing.Queue, response_queue, host):
+    def _process_tasks(
+        task_queue: multiprocessing.Queue, response_queue, host, cache_path
+    ):
         """
         Threaded process which keeps track of the server connection and data packets.
         """
@@ -195,6 +201,10 @@ class Scheduler:
 
         event_list = []
         cxn = Connection(*host)
+        if cache_path is not None:
+            cache = Cache(cache_path)
+        else:
+            cache = None
         running = None
 
         while True:
@@ -215,7 +225,7 @@ class Scheduler:
                     logger.warning("Clearing event list, %s removed ", len(event_list))
                     if running is not None:
                         logger.warning("%s Cancelling", running.name)
-                        running.cancel(cxn)
+                        running.cancel(cxn, cache)
                         event_list = [running]
                     else:
                         event_list = []
@@ -233,7 +243,7 @@ class Scheduler:
                             str(value),
                         )
                         continue
-                    status = value.status(cxn)
+                    status = value.status(cxn, cache)
                     if status.is_started:
                         logger.error("This event has already happened, ignoring it")
                         continue
@@ -246,7 +256,7 @@ class Scheduler:
             trigger = None
             running = None
             for event in event_list:
-                status = event.status(cxn)
+                status = event.status(cxn, cache)
                 logger.debug("%s - %s", event.name, str(status))
                 if status.is_active:
                     running = event
@@ -260,7 +270,7 @@ class Scheduler:
 
             if running is None and trigger is not None:
                 logger.info("%s - Triggered", trigger.name)
-                trigger.trigger(cxn)
+                trigger.trigger(cxn, cache)
 
         logger.error("Closing Connection!")
         cxn.close()
