@@ -4,9 +4,15 @@ import io
 import logging
 from collections import namedtuple
 from astropy.io import fits
-
+from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+class SolveStatus(Enum):
+    Unsolved=0 # Unsolved, but intended to be solved
+    Solved=1
+    SolveFailed=2
+    DontSolve=3 # Temporary frame, may be deleted after a day (IE: focusing images)
 
 
 _CACHE_SQL = """
@@ -24,16 +30,14 @@ CREATE TABLE frames(
     duration REAL not null,
     filter TEXT not null,
     solved int not null,
-    ra REAL,
-    dec REAL
 );
 
-CREATE INDEX exp_time ON frames (time);
+CREATE INDEX obs_time ON frames (time);
 """
 
 FrameMeta = namedtuple(
     "FrameMeta",
-    "id, job, time, frame, private, keep_frame, duration, filter, solved, ra, dec",
+    "id, job, time, frame, private, keep_frame, duration, filter, solved"
 )
 
 
@@ -88,6 +92,7 @@ class Cache:
                     return None
                 res = list(res)
             res[3] = fits.HDUList.fromstring(res[3])[0]
+            res[8] = SolveStatus(res[8])
             return FrameMeta(*res)
         except sqlite3.OperationalError as e:
             logger.error(e)
@@ -103,7 +108,7 @@ class Cache:
 
     def update_frame(self, frame: FrameMeta):
         args = ", ".join([x + "=?" for x in FrameMeta._fields])
-        frame = frame._replace(frame=fits_to_binary(frame.frame))
+        frame = frame._replace(frame=fits_to_binary(frame.frame), solved=frame.solved.value)
 
         try:
             with self.con:
