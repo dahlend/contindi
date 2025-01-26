@@ -1,7 +1,13 @@
+from .base import Event, EventStatus
+from .capture import Capture
+from .filter import SetFilter
+from .slew import Slew
+from .sync import Sync
 import kete
+import numpy as np
 
 
-__all__ = []
+__all__ = ["Event", "EventStatus", "Capture", "SetFilter", "Slew", "Sync"]
 
 
 def jnow(self, jd=None):
@@ -14,7 +20,8 @@ def jnow(self, jd=None):
     else:
         jd = kete.Time(jd).jd
     rot = np.transpose(kete.conversion.earth_precession_rotation(jd))
-    return self.as_equatorial.Vector(rot @ vec, kete.Frames.Equatorial)
+    return kete.Vector(rot @ self.as_equatorial, kete.Frames.Equatorial)
+
 
 # monkey patch Vector to use this
 kete.Vector.jnow = jnow

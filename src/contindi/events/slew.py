@@ -1,14 +1,8 @@
 import kete
-import tempfile
-import os
-import time
-import numpy as np
-from astropy.io import fits
-from astropy.wcs import WCS
 from ..cache import Cache
 from .base import Event, EventStatus
 from ..system import Connection
-from .dev_names import TELESCOPE
+from ..config import CONFIG
 
 
 class Slew(Event):
@@ -16,37 +10,38 @@ class Slew(Event):
         self.ra = ra
         self.dec = dec
         self.priority = priority
-        self.name = f"{name}(ra={ra:0.2f}, dec={dec:0.2f}, priority={priority})"
         self._status = EventStatus.Ready
 
-    def cancel(self, cxn: Connection, _cache: Cache) -> EventStatus:
+    def cancel(self, cxn: Connection, _cache: Cache):
         """Cancel the running event."""
-        cxn.set_value(TELESCOPE, "TELESCOPE_ABORT_MOTION", "On", block=False)
+        cxn.set_value(CONFIG.mount, "TELESCOPE_ABORT_MOTION", "On", block=False)
         self._status = EventStatus.Failed
         return self._status, "Slew cancelled, motion aborted"
 
-    def status(self, cxn: Connection, _cache: Cache) -> EventStatus:
+    def status(self, cxn: Connection, _cache: Cache):
         """Check the status of the event."""
-        ra = self.ra / 360 * 24
-        cur_ra, cur_dec = cxn[TELESCOPE]["EQUATORIAL_EOD_COORD"].value
+        cur_ra, cur_dec = cxn[CONFIG.mount]["EQUATORIAL_EOD_COORD"].value
         cur_ra *= 360 / 24
         cur_vec = kete.Vector.from_ra_dec(cur_ra, cur_dec)
         target_vec = kete.Vector.from_ra_dec(self.ra, self.dec)
 
         if cur_vec.angle_between(target_vec) < 3 / 60 / 60:
-            return EventStatus.Finished,  "Slew complete"
+            return EventStatus.Finished, "Slew complete"
         return self._status, None
 
     def trigger(self, cxn: Connection, _cache: Cache):
         """Trigger the beginning of the event."""
         self._status = EventStatus.Running
         ra = self.ra / 360 * 24
-        cxn.set_value(TELESCOPE, "ON_COORD_SET", SLEW="On")
+        cxn.set_value(CONFIG.mount, "ON_COORD_SET", SLEW="On")
         cxn.set_value(
-            TELESCOPE,
+            CONFIG.mount,
             "EQUATORIAL_EOD_COORD",
             RA=ra,
             DEC=self.dec,
             block=False,
             timeout=90,
         )
+
+    def __repr__(self):
+        return f"Slew(ra={self.ra:0.3f}, dec={self.dec:0.3f}, priority={self.priority})"

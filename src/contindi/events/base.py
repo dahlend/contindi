@@ -1,15 +1,9 @@
 import dataclasses
-from collections.abc import Callable
 from enum import Enum
-import multiprocessing
-import signal
-import logging
-from queue import Empty
-import time
 from abc import abstractmethod, ABC
 from typing import Optional
-from .system import Connection
-from .cache import Cache
+from ..system import Connection
+from ..cache import Cache
 
 
 class EventStatus(Enum):
@@ -85,19 +79,19 @@ class Event(ABC):
         try:
             return self.cancel(cxn, cache)
         except Exception as e:
-            return EventStatus.Failed
+            return EventStatus.Failed, f"Failed with exception {str(e)}"
 
-    def _status(self, cxn, cache):
+    def _get_status(self, cxn, cache):
         try:
             return self.status(cxn, cache)
         except Exception as e:
-            return EventStatus.Failed
+            return EventStatus.Failed, f"Failed with exception {str(e)}"
 
     def _trigger(self, cxn, cache):
         try:
             return self.trigger(cxn, cache)
         except Exception as e:
-            return EventStatus.Failed
+            return EventStatus.Failed, f"Failed with exception {str(e)}"
 
     def __lt__(self, other):
         return self.priority < other.priority
@@ -125,11 +119,9 @@ class SeriesEvent(Event):
             if len(self.event_list) == 0:
                 return status, msg
             self.current = self.event_list.pop(0)
-            logger.info("%s - %s - Trigger", self.name, self.current.name)
             self.current.trigger(cxn, cache)
             return self.current.status(cxn, cache)
         return status
 
     def __repr__(self):
         return f"{self.name}(priority={self.priority}, event_list={self.event_list})"
-

@@ -1,14 +1,8 @@
-import kete
-import tempfile
-import os
-import time
-import numpy as np
-from astropy.io import fits
-from astropy.wcs import WCS
 from ..cache import Cache
 from .base import Event, EventStatus
 from ..system import Connection
-from .dev_names import TELESCOPE
+from ..config import CONFIG
+
 
 class SetFilter(Event):
     def __init__(self, filt, priority=0, name="Capture"):
@@ -26,7 +20,7 @@ class SetFilter(Event):
     def status(self, cxn: Connection, cache: Cache) -> EventStatus:
         """Check the status of the event."""
         if self._status == EventStatus.Running:
-            cur_state = cxn.state[WHEEL]["FILTER_SLOT"]
+            cur_state = cxn.state[CONFIG.wheel]["FILTER_SLOT"]
             if cur_state.value[0] == self.slot_id:
                 self._status = EventStatus.Finished
         return self._status, f"Filter changed to {repr(self.filt)}"
@@ -34,9 +28,9 @@ class SetFilter(Event):
     def trigger(self, cxn: Connection, _cache: Cache):
         """Trigger the beginning of the event."""
         lookup = {}
-        for name, elem in cxn.state[WHEEL]["FILTER_NAME"].elements.items():
+        for name, elem in cxn.state[CONFIG.wheel]["FILTER_NAME"].elements.items():
             idx = int(name.rsplit("_", maxsplit=1)[1])
             lookup[elem.value] = idx
         self.slot_id = lookup[self.filt]
-        cxn.set_value(WHEEL, "FILTER_SLOT", self.slot_id, block=False)
+        cxn.set_value(CONFIG.wheel, "FILTER_SLOT", self.slot_id, block=False)
         self._status = EventStatus.Running, f"Filter changing to {repr(self.filt)}"

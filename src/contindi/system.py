@@ -1,4 +1,3 @@
-from collections import defaultdict
 import socket
 import select
 import signal
@@ -7,9 +6,8 @@ import copy
 import logging
 import time
 import xml.etree.ElementTree as ET
-import dataclasses
 from queue import Empty
-from collections import OrderedDict, UserDict
+from collections import UserDict
 from .command import GetProperties, SetValue, DeleteProperty
 from .base import GenericVector
 from .blob import BlobVector
@@ -311,7 +309,6 @@ class Connection:
                 elif isinstance(element, GenericVector):
                     dev = element.device
                     name = element.name
-                    group = element.group
                     logger.debug("DEFINE VECTOR %s / %s", dev, name)
                     if dev not in state:
                         state[dev] = Device(name=dev)

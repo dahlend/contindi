@@ -8,11 +8,12 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+
 class SolveStatus(Enum):
-    Unsolved=0 # Unsolved, but intended to be solved
-    Solved=1
-    SolveFailed=2
-    DontSolve=3 # Temporary frame, may be deleted after a day (IE: focusing images)
+    Unsolved = 0  # Unsolved, but intended to be solved
+    Solved = 1
+    SolveFailed = 2
+    DontSolve = 3  # Temporary frame, may be deleted after a day (IE: focusing images)
 
 
 _CACHE_SQL = """
@@ -36,8 +37,7 @@ CREATE INDEX obs_time ON frames (time);
 """
 
 FrameMeta = namedtuple(
-    "FrameMeta",
-    "id, job, time, frame, private, keep_frame, duration, filter, solved"
+    "FrameMeta", "id, job, time, frame, private, keep_frame, duration, filter, solved"
 )
 
 
@@ -57,7 +57,7 @@ class Cache:
     def initialize(self):
         try:
             with self.con:
-                self.con.executescript(_IMG_CACHE_SQL)
+                self.con.executescript(_CACHE_SQL)
         except sqlite3.OperationalError as e:
             logger.error(e)
 
@@ -108,7 +108,9 @@ class Cache:
 
     def update_frame(self, frame: FrameMeta):
         args = ", ".join([x + "=?" for x in FrameMeta._fields])
-        frame = frame._replace(frame=fits_to_binary(frame.frame), solved=frame.solved.value)
+        frame = frame._replace(
+            frame=fits_to_binary(frame.frame), solved=frame.solved.value
+        )
 
         try:
             with self.con:

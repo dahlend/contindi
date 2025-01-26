@@ -1,14 +1,12 @@
 import kete
-import tempfile
-import os
 import time
-import numpy as np
-from astropy.io import fits
 from astropy.wcs import WCS
 from ..cache import Cache
-from .base import Event, EventStatus
+from .base import Event, EventStatus, SeriesEvent
 from ..system import Connection
-from .dev_names import TELESCOPE
+from ..config import CONFIG
+from .capture import Capture
+
 
 class _Sync(Event):
     def __init__(self, priority=0, name="Sync"):
@@ -54,21 +52,23 @@ class _Sync(Event):
             vec = vec.jnow(obs_time.jd)
             ra = vec.ra / 360 * 24
             dec = vec.dec
-            cxn.set_value(TELESCOPE, "ON_COORD_SET", SYNC="On")
-            cxn.set_value(TELESCOPE, "EQUATORIAL_EOD_COORD", RA=ra, DEC=dec)
+            cxn.set_value(CONFIG.mount, "ON_COORD_SET", SYNC="On")
+            cxn.set_value(CONFIG.mount, "EQUATORIAL_EOD_COORD", RA=ra, DEC=dec)
             return EventStatus.Finished, "Sync complete"
         elif frame.solved == 2:
             cache.delete_frame(frame)
             return EventStatus.Failed, "Solver failed to find solution"
         else:
             cache.delete_frame(frame)
-            return EventStatus.Failed, f"Solver returned solved state {frame.solved}, frame deleted."
+            return (
+                EventStatus.Failed,
+                f"Solver returned solved state {frame.solved}, frame deleted.",
+            )
 
     def trigger(self, cxn: Connection, cache: Cache, remaining_attempts=5):
         """Trigger the beginning of the event."""
         self._status = EventStatus.Running
 
 
-Sync = lambda priority=0: SeriesEvent(
-    "CaptureSolve", priority, [Capture("sync", 1), _Sync()]
-)
+def Sync(priority=0):
+    return SeriesEvent("CaptureSolve", priority, [Capture("sync", 1), _Sync()])

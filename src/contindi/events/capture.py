@@ -1,8 +1,8 @@
-import kete
 from ..cache import Cache
 from ..system import Connection
-from .dev_names import CAMERA
+from ..config import CONFIG
 from .base import Event, EventStatus
+
 
 class Capture(Event):
     def __init__(self, job_name, duration, priority=0, keep=True, private=False):
@@ -22,7 +22,7 @@ class Capture(Event):
     def status(self, cxn: Connection, cache: Cache) -> EventStatus:
         """Check the status of the event."""
         if self._status == EventStatus.Running:
-            cur_state = cxn[CAMERA]["CCD1"]
+            cur_state = cxn[CONFIG.camera]["CCD1"]
             if self.timestamp != cur_state.timestamp:
                 self._status = EventStatus.Finished
                 cache.add_frame(
@@ -36,10 +36,12 @@ class Capture(Event):
 
     def trigger(self, cxn: Connection, _cache: Cache):
         """Trigger the beginning of the event."""
-        self.timestamp = cxn[CAMERA]["CCD1"].timestamp
-        cxn.set_value(CAMERA, "CCD_EXPOSURE", self.duration, block=False)
+        self.timestamp = cxn[CONFIG.camera]["CCD1"].timestamp
+        cxn.set_value(CONFIG.camera, "CCD_EXPOSURE", self.duration, block=False)
         self._status = EventStatus.Running
 
     def __repr__(self):
-        return (f"Capture({self.job_name}, duration={self.duration}, "
-            f"priority={self.priority}, keep={self.keep}, private={self.private})")
+        return (
+            f"Capture({self.job_name}, duration={self.duration}, "
+            f"priority={self.priority}, keep={self.keep}, private={self.private})"
+        )

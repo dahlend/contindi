@@ -1,14 +1,11 @@
-import dataclasses
-from collections.abc import Callable
-from enum import Enum
 import multiprocessing
 import signal
 import logging
-from queue import Empty
 import time
-from abc import abstractmethod, ABC
 from .system import Connection
 from .cache import Cache
+from .events import Event, EventStatus
+from .config import CONFIG
 
 
 logger = logging.getLogger(__name__)
@@ -27,23 +24,10 @@ class Scheduler:
 
     timeout = 10
 
-    def __init__(self, host="localhost", port=7624, cache_path=None):
-        """
-        Parameters
-        ----------
-        host:
-            Host address for the INDI server, defaults to `localhost`.
-        port:
-            Port number of the INDI server, defaults to 7624.
-        cache_path:
-            File where the cache should be, if `None`, no cache will be used.
-        """
-        self.host = (host, port)
-
+    def __init__(self):
         self.task_queue = multiprocessing.Queue()
         self.response_queue = multiprocessing.Queue()
         self.process = None
-        self.cache_path = cache_path
         self.connect()
 
     def connect(self):
@@ -54,7 +38,7 @@ class Scheduler:
             del self.process
         self.process = multiprocessing.Process(
             target=self._process_tasks,
-            args=(self.task_queue, self.response_queue, self.host, self.cache_path),
+            args=(self.task_queue, self.response_queue, CONFIG),
         )
         # Ensures process exits when main program ends
         self.process.start()
@@ -82,20 +66,19 @@ class Scheduler:
         self.process.terminate()
 
     @staticmethod
-    def _process_tasks(
-        task_queue: multiprocessing.Queue, response_queue, host, cache_path
-    ):
+    def _process_tasks(task_queue: multiprocessing.Queue, response_queue, config):
         """
         Threaded process which keeps track of the server connection and data packets.
         """
+        CONFIG.update(config)
         # Ignore interrupt signals
         # this allows keyboard interrupts to run without issue
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
         event_list = []
-        cxn = Connection(*host)
-        if cache_path is not None:
-            cache = Cache(cache_path)
+        cxn = Connection(*CONFIG.host)
+        if CONFIG.cache is not None:
+            cache = Cache(CONFIG.cache)
         else:
             cache = None
         running = None
@@ -117,14 +100,14 @@ class Scheduler:
                 elif cmd == "clear":
                     logger.warning("Clearing event list, %s removed ", len(event_list))
                     if running is not None:
-                        logger.warning("%s Cancelling", running.name)
+                        logger.warning("%s Cancelling", running)
                         _, msg = running._cancel(cxn, cache)
                         event_list = [running]
                     else:
                         event_list = []
                 elif cmd == "status":
                     if running is not None:
-                        logger.warning("%s Running", running.name)
+                        logger.warning("%s Running", running)
                     if len(event_list) > 0:
                         logger.warning("%s remaining in queue", len(event_list))
                     else:
@@ -136,9 +119,17 @@ class Scheduler:
                             str(value),
                         )
                         continue
-                    status, msg = value._status(cxn, cache)
+                    status, msg = value._get_status(cxn, cache)
+                    if status == EventStatus.Failed:
+                        logger.error(
+                            "Event %s Failed with message:  %s", str(value), str(msg)
+                        )
                     if status.is_started:
-                        logger.error("This event has already happened, ignoring it")
+                        logger.error(
+                            "This event has already happened, ignoring it %s - %s",
+                            str(value),
+                            str(status),
+                        )
                         continue
                     event_list.append(value)
                     event_list.sort()
@@ -149,8 +140,8 @@ class Scheduler:
             trigger = None
             running = None
             for event in event_list:
-                status, msg = event._status(cxn, cache)
-                logger.debug("%s - %s", event.name, str(status))
+                status, msg = event._get_status(cxn, cache)
+                logger.debug("%s - %s", event, str(status))
                 if status.is_active:
                     running = event
                 if not status.is_done:
@@ -158,12 +149,12 @@ class Scheduler:
                     if trigger is None and status == EventStatus.Ready:
                         trigger = event
                 else:
-                    logger.info("%s - Finished with %s", event.name, str(status))
+                    logger.info("%s - Finished with %s", event, str(status))
             event_list = keep
 
             if running is None and trigger is not None:
-                logger.info("%s - Triggered", trigger.name)
-                _, msg = trigger._trigger(cxn, cache)
+                logger.info("%s - Triggered", trigger)
+                trigger._trigger(cxn, cache)
 
         logger.error("Closing Connection!")
         cxn.close()
