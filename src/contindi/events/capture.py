@@ -13,6 +13,7 @@ class Capture(Event):
         self.job_name = job_name
         self._status = EventStatus.Ready
         self.timestamp = None
+        self.max_time = duration + 5
 
     def cancel(self, cxn: Connection, _cache: Cache) -> EventStatus:
         """Cancel the running event."""

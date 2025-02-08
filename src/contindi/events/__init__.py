@@ -1,5 +1,7 @@
 from .base import Event, EventStatus
 from .capture import Capture
+from .constraints import TimeConstrained
+from .delay import Delay
 from .filter import SetFilter
 from .slew import Slew
 from .sync import Sync
@@ -7,7 +9,16 @@ import kete
 import numpy as np
 
 
-__all__ = ["Event", "EventStatus", "Capture", "SetFilter", "Slew", "Sync"]
+__all__ = [
+    "Event",
+    "EventStatus",
+    "Capture",
+    "Delay",
+    "SetFilter",
+    "Slew",
+    "Sync",
+    "TimeConstrained",
+]
 
 
 def jnow(self, jd=None):

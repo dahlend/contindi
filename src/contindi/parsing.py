@@ -1,6 +1,5 @@
 from xml.etree import ElementTree
 import logging
-import time
 from .switch import SwitchVector
 from .text import TextVector
 from .number import NumberVector
@@ -38,10 +37,9 @@ def chunk_xml(text):
 
 
 def parse_chunk(chunk):
-
     try:
         elem = ElementTree.fromstring(chunk)
-    except:
+    except Exception:
         logger.error("Failed to parse xml: ", chunk)
         return None
     tag = elem.tag.lower()

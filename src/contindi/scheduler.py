@@ -126,7 +126,7 @@ class Scheduler:
                         )
                     if status.is_started:
                         logger.error(
-                            "This event has already happened, ignoring it %s - %s",
+                            "This event has already occurred, ignoring it %s - %s",
                             str(value),
                             str(status),
                         )
@@ -155,9 +155,6 @@ class Scheduler:
             if running is None and trigger is not None:
                 logger.info("%s - Triggered", trigger)
                 trigger._trigger(cxn, cache)
-
-        logger.error("Closing Connection!")
-        cxn.close()
 
     def __del__(self):
         self.close()
