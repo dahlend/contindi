@@ -67,6 +67,9 @@ class Event(ABC):
     _start_time: Optional[float] = dataclasses.field(default=None, repr=False)
     """Reserved value to keep track of when the event is triggered."""
 
+    _status: EventStatus = dataclasses.field(default=EventStatus.NotReady, repr=False)
+    """Reserved value to keep track of when the current event status."""
+
     @abstractmethod
     def cancel(
         self, cxn: Connection, cache: Cache
@@ -92,7 +95,7 @@ class Event(ABC):
         except Exception as e:
             return EventStatus.Failed, f"Failed with exception {str(e)}"
 
-    def _get_status(self, cxn, cache):
+    def _get_status(self, cxn, cache) -> tuple[EventStatus, Optional[str]]:
         try:
             status, msg = self.status(cxn, cache)
             if (
@@ -109,8 +112,8 @@ class Event(ABC):
         self._start_time = time.time()
         try:
             return self.trigger(cxn, cache)
-        except Exception as e:
-            return EventStatus.Failed, f"Failed with exception {str(e)}"
+        except Exception:
+            self._status = EventStatus.Failed
 
     def __lt__(self, other):
         return self.priority < other.priority
@@ -148,8 +151,8 @@ class SeriesEvent(Event):
         self._start_time = time.time()
         try:
             return self.event_list[self.current].trigger(cxn, cache)
-        except Exception as e:
-            return EventStatus.Failed, f"Failed with exception {str(e)}"
+        except Exception:
+            self._status = EventStatus.Failed
 
     def status(self, cxn: Connection, cache: Cache):
         status, msg = self.event_list[self.current].status(cxn, cache)

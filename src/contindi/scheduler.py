@@ -77,6 +77,8 @@ class Scheduler:
 
         event_list = []
         cxn = Connection(*CONFIG.host)
+        cxn.set_camera_recv()
+
         if CONFIG.cache is not None:
             cache = Cache(CONFIG.cache)
         else:
@@ -142,6 +144,8 @@ class Scheduler:
             for event in event_list:
                 status, msg = event._get_status(cxn, cache)
                 logger.debug("%s - %s", event, str(status))
+                if msg is not None:
+                    logger.error(msg)
                 if status.is_active:
                     running = event
                 if not status.is_done:

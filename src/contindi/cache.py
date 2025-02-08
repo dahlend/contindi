@@ -30,7 +30,7 @@ CREATE TABLE frames(
     keep_frame bool not null,
     duration REAL not null,
     filter TEXT not null,
-    solved int not null,
+    solved int not null
 );
 
 CREATE INDEX obs_time ON frames (time);

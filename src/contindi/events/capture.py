@@ -26,6 +26,8 @@ class Capture(Event):
             cur_state = cxn[CONFIG.camera]["CCD1"]
             if self.timestamp != cur_state.timestamp:
                 self._status = EventStatus.Finished
+                if cache is None:
+                    return self._status, "No Cache found, image not saved."
                 cache.add_frame(
                     self.job_name,
                     cur_state.elements["CCD1"].frame,
@@ -38,8 +40,8 @@ class Capture(Event):
     def trigger(self, cxn: Connection, _cache: Cache):
         """Trigger the beginning of the event."""
         self.timestamp = cxn[CONFIG.camera]["CCD1"].timestamp
-        cxn.set_value(CONFIG.camera, "CCD_EXPOSURE", self.duration, block=False)
         self._status = EventStatus.Running
+        cxn.set_value(CONFIG.camera, "CCD_EXPOSURE", self.duration, block=False)
 
     def __repr__(self):
         return (
