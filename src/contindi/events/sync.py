@@ -9,9 +9,8 @@ from .capture import Capture
 
 
 class _Sync(Event):
-    def __init__(self, priority=0, name="Sync"):
+    def __init__(self, priority=0):
         self.priority = priority
-        self.name = name
         self._status = EventStatus.Ready
         self.attempts = 0
 

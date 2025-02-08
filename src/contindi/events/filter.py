@@ -5,10 +5,9 @@ from ..config import CONFIG
 
 
 class SetFilter(Event):
-    def __init__(self, filt, priority=0, name="Capture"):
+    def __init__(self, filt, priority=0):
         self.priority = priority
         self.filt = filt
-        self.name = f"{name}(filt={filt}, priority={priority})"
         self._status = EventStatus.Ready
         self.slot_id = None
 
