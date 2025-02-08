@@ -115,7 +115,7 @@ class NumberVector(GenericVector):
         for element in self.elements.values():
             try:
                 v_str = element.format % element.value
-            except:
+            except Exception:
                 v_str = str(element.value)
             vals.append(
                 prefix + tab + element.name + " (" + element.label + ") : " + v_str

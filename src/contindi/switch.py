@@ -2,7 +2,7 @@ import dataclasses
 import logging
 from enum import Enum
 import xml.etree.ElementTree as ET
-from .base import GenericVector, NamedInfo, timestamp_from_xml
+from .base import GenericVector, NamedInfo
 
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,6 @@ class SwitchVector(GenericVector):
 
         cmd = ET.Element("newSwitchVector", device=self.device, name=self.name)
         for elem_name, new_value in kwargs.items():
-            element = self.elements[elem_name]
             new_value = str(new_value).lower().capitalize()
             if new_value not in ["On", "Off"]:
                 raise ValueError("Switch states must either be On or Off")

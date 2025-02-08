@@ -1,7 +1,7 @@
 import dataclasses
 import logging
 import xml.etree.ElementTree as ET
-from .base import GenericVector, NamedInfo, timestamp_from_xml
+from .base import GenericVector, NamedInfo
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,6 @@ class TextVector(GenericVector):
         kwargs = super().create_xml_command(*args, **kwargs)
         cmd = ET.Element("newTextVector", device=self.device, name=self.name)
         for elem_name, new_value in kwargs.items():
-            element = self.elements[elem_name]
             elem = ET.SubElement(cmd, "oneText", name=elem_name)
             elem.text = str(new_value)
         return ET.tostring(cmd).decode()

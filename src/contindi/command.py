@@ -1,6 +1,5 @@
 import dataclasses
 import logging
-import datetime
 from .base import INDI_VERSION, NamedInfo, timestamp_from_xml
 from typing import Optional
 
@@ -63,7 +62,7 @@ class DeleteProperty(NamedInfo):
 
         # Parse required values
         if "device" not in attribs:
-            raise ValueError(f"Failed to parse command, 'device' not defined.")
+            raise ValueError("Failed to parse command, 'device' not defined.")
         attribs["timestamp"] = timestamp_from_xml(xml_element)
         attribs["name"] = attribs.get("name", None)
         return cls(**attribs)
