@@ -46,22 +46,26 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
         click.echo("New cache, initializing.")
         cache.initialize()
 
-    cxn.set_camera_recv()
+    cxn.set_camera_recv(send_here="Only")
 
     event_map = {}
 
     running = None
 
     while True:
-        jobs = {j.id: j for j in cache.get_jobs()}
+        time.sleep(0.1)
+        jobs = cache.get_jobs()
 
-        # if there is nothing to do, chill for bit.
-        if len(jobs) == 0:
-            time.sleep(0.1)
-            continue
-
-        for job in jobs.values():
+        for job in jobs:
             if job.id in event_map:
+                continue
+            if job.status in ["FINISHED", "FAILED"]:
+                continue
+            if job.status == "RUNNING":
+                job = job._replace(
+                    status="FAILED", msg="Job was running, but no event found."
+                )
+                cache.update_job(job)
                 continue
             try:
                 event = parse_job(job)
@@ -72,41 +76,52 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
                 )
                 cache.update_job(job)
                 continue
+            click.echo("UPDATING EVENT MAP!")
             event_map[job.id] = event
-        click.echo(event_map)
         event_map = {k: v for k, v in sorted(event_map.items(), key=lambda x: x[1])}
 
         trigger = None
         running = None
+        delete = []
         for job_id, event in event_map.items():
             status, msg = event._get_status(cxn, cache)
             job = cache.get_job(job_id)
+            if job is None:
+                event_map[job_id].cancel(cxn, cache)
+                delete.append(job_id)
+                continue
 
             if status == EventStatus.Running:
                 running = event
 
             if status == EventStatus.Finished:
-                click.echo("FINISHED %s - %s", event, msg)
-                del event_map[job_id]
+                click.echo(f"FINISHED {event} - {msg}")
+                delete.append(job_id)
                 job = job._replace(status="FINISHED", msg=msg)
                 cache.update_job(job)
             elif status == EventStatus.Failed:
                 click.echo(f"FAILED {str(event)} - {str(msg)}")
-                del event_map[job_id]
+                delete.append(job_id)
                 job = job._replace(status="FAILED", msg=msg)
                 cache.update_job(job)
             elif status == EventStatus.Running or status == EventStatus.Canceling:
-                job = job._replace(status="RUNNING", msg=msg)
-                cache.update_job(job)
-
-                click.echo(f"UPDATE {str(job)}")
+                if job.status != "RUNNING":
+                    job = job._replace(status="RUNNING", msg=msg)
+                    cache.update_job(job)
+                    click.echo(f"UPDATE {str(job)}")
             elif status == EventStatus.NotReady:
                 pass
             elif status == EventStatus.Ready and trigger is None:
                 trigger = job_id
+        for job_id in delete:
+            del event_map[job_id]
 
         if running is None and trigger is not None:
-            job = jobs[trigger]
+            job = cache.get_job(trigger)
+            if job is None:
+                event_map[trigger].cancel(cxn, cache)
+                del event_map[trigger]
+                continue
             trigger = event_map[trigger]
             job = job._replace(status="RUNNING", msg=msg)
             cache.update_job(job)
@@ -117,7 +132,7 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
 def parse_job(job: Job):
     jd_start = kete.Time(job.jd_start).to_datetime()
     jd_end = kete.Time(job.jd_end).to_datetime()
-    cmd, *args = job.target.split()
+    cmd, *args = job.cmd.split()
     if cmd.upper() == "STATIC":
         ra, dec = args
         ra = float(ra)

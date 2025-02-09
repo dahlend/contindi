@@ -36,7 +36,7 @@ CREATE INDEX obs_time ON frames (time);
 CREATE TABLE job_queue(
     id INTEGER PRIMARY KEY,
     job TEXT NOT NULL,
-    target TEXT NOT NULL,
+    cmd TEXT NOT NULL,
     priority INTEGER NOT NULL,
     private INTEGER NOT NULL,
     duration REAL NOT NULL,
@@ -48,7 +48,7 @@ CREATE TABLE job_queue(
 );
 
 /*
-Allowed target types:
+Allowed cmd types:
 "FOCUS"
 "HOME"
 "SYNC_INPLACE"
@@ -72,7 +72,7 @@ FrameMeta = namedtuple(
 
 Job = namedtuple(
     "Job",
-    "id, job, target, priority, private, duration, filter, jd_start, jd_end, status, msg",
+    "id, job, cmd, priority, private, duration, filter, jd_start, jd_end, status, msg",
 )
 
 
@@ -99,17 +99,17 @@ class Cache:
     def add_static_exposure(
         self, priority, jd_start, jd_end, job, ra, dec, duration, filter, private=False
     ):
-        target = f"STATIC {ra} {dec}"
+        cmd = f"STATIC {ra} {dec}"
 
         try:
             with self.con:
                 self.con.execute(
                     """ INSERT INTO job_queue
-                                  (job, target, priority, private, duration, filter, jd_start, jd_end)
+                                  (job, cmd, priority, private, duration, filter, jd_start, jd_end)
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         job,
-                        target,
+                        cmd,
                         priority,
                         private,
                         duration,
@@ -127,7 +127,7 @@ class Cache:
             with self.con:
                 self.con.execute(
                     """ INSERT INTO job_queue
-                                  (job, target, priority, private, duration, filter, jd_start, jd_end)
+                                  (job, cmd, priority, private, duration, filter, jd_start, jd_end)
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         "FOCUS",
@@ -149,7 +149,7 @@ class Cache:
             with self.con:
                 self.con.execute(
                     """ INSERT INTO job_queue
-                                  (job, target, priority, private, duration, filter, jd_start, jd_end)
+                                  (job, cmd, priority, private, duration, filter, jd_start, jd_end)
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         "SYNC_INPLACE",
@@ -171,7 +171,7 @@ class Cache:
             with self.con:
                 self.con.execute(
                     """ INSERT INTO job_queue
-                                  (job, target, priority, private, duration, filter, jd_start, jd_end)
+                                  (job, cmd, priority, private, duration, filter, jd_start, jd_end)
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         "HOME",
@@ -188,13 +188,17 @@ class Cache:
             logger.error(e)
             pass
 
-    def get_jobs(self, status="QUEUED"):
+    def get_jobs(self, status=None):
         args = ", ".join([x for x in Job._fields])
+        if status is not None:
+            status = f"where status='{status}"
+        else:
+            status = ""
         try:
             with self.con:
                 res = self.con.execute(
                     f"""Select {args}
-                    from job_queue where status='{status}' ORDER BY priority asc"""
+                    from job_queue {status} ORDER BY priority asc"""
                 ).fetchall()
                 if res is None:
                     return None

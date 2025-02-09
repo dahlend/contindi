@@ -149,10 +149,7 @@ class SeriesEvent(Event):
 
     def _trigger(self, cxn: Connection, cache: Cache):
         self._start_time = time.time()
-        try:
-            return self.event_list[self.current].trigger(cxn, cache)
-        except Exception:
-            self._status = EventStatus.Failed
+        self.event_list[self.current].trigger(cxn, cache)
 
     def status(self, cxn: Connection, cache: Cache):
         status, msg = self.event_list[self.current].status(cxn, cache)
