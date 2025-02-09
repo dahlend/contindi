@@ -93,6 +93,7 @@ class Connection:
 
         self.task_queue = multiprocessing.Queue()
         self.response_queue = multiprocessing.Queue()
+        self.message_queue = multiprocessing.Queue()
         self.process = None
         self.connect()
 
@@ -103,8 +104,9 @@ class Connection:
             del self.process
         self.process = multiprocessing.Process(
             target=self._process_tasks,
-            args=(self.task_queue, self.response_queue, self.host),
+            args=(self.task_queue, self.response_queue, self.message_queue, self.host),
         )
+
         # Ensures process exits when main program ends
         self.process.daemon = True
         self.process.start()
@@ -116,6 +118,12 @@ class Connection:
         """
         if not self.is_connected:
             raise ValueError("Connection is closed.")
+
+        # clear message queue
+        while not self.message_queue.empty():
+            msg, dev, name = self.message_queue.get_nowait()
+            logger.error(f"{msg} - {dev} - {name}")
+
         self.task_queue.put("get state")
         state = self.response_queue.get(timeout=self.timeout)
         while True:
@@ -221,7 +229,12 @@ class Connection:
             self.task_queue.put("send " + cmd.decode())
 
     @staticmethod
-    def _process_tasks(task_queue: multiprocessing.Queue, response_queue, host):
+    def _process_tasks(
+        task_queue: multiprocessing.Queue,
+        response_queue: multiprocessing.Queue,
+        message_queue: multiprocessing.Queue,
+        host,
+    ):
         """
         Threaded process which keeps track of the server connection and data packets.
         """
@@ -234,9 +247,9 @@ class Connection:
         state = State()
         cxn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         cxn.connect(host)
-        cxn.send(GetProperties().to_xml().encode())
+        cxn.sendall(GetProperties().to_xml().encode())
         first_time = True
-        time.sleep(0.1)
+        time.sleep(0.25)
 
         while True:
             if not first_time:
@@ -248,22 +261,21 @@ class Connection:
                     elif task[:4] == "send":
                         _, cmd = task.split(maxsplit=1)
                         logger.debug("Sending Command %s", cmd)
-                        cxn.send(cmd.encode())
+                        cxn.sendall(cmd.encode())
                     elif task == "stop":
                         break
                     else:
                         logger.error("Unkown Command")
                 except Empty:
                     pass
+            first_time = False
 
             # Get new responses
             ready = select.select([cxn], [], [], 0.001)
             if not ready[0]:
                 continue
-            first_time = False
 
-            data = cxn.recv(1024**3)
-            partial = data.decode()
+            partial = cxn.recv(1024**2).decode()
 
             # responses broken up into valid xml chunks and incomplete xml elements
             new_elements, rem = chunk_xml(partial)
@@ -280,8 +292,7 @@ class Connection:
                         partial = ""
                         break
                     time.sleep(0.01)
-                    data = cxn.recv(1024**3)
-                    partial = partial + data.decode()
+                    partial = partial + cxn.recv(1024**2).decode()
                     chunks, rem = chunk_xml(partial)
                     new_elements.extend(chunks)
 
@@ -300,7 +311,6 @@ class Connection:
                 if isinstance(element, DeleteProperty):
                     dev = element.device
                     name = element.name
-                    logger.debug("DELETE %s / %s", dev, name)
                     if name is None and dev in state:
                         del state[dev]
                     elif dev in state and name in state[dev]:
@@ -308,18 +318,16 @@ class Connection:
                 elif isinstance(element, GenericVector):
                     dev = element.device
                     name = element.name
-                    logger.debug("DEFINE VECTOR %s / %s", dev, name)
                     if dev not in state:
                         state[dev] = Device(name=dev)
                     state[dev][name] = element
                 elif isinstance(element, SetValue):
                     dev = element.device
                     name = element.name
-                    logger.debug("SET %s / %s", dev, name)
                     if dev in state and name in state[dev]:
                         state[dev][name].update_from_xml(element.xml_element)
                 elif isinstance(element, Message):
-                    logger.error("%s - %s", element.device, element.message)
+                    message_queue.put(("MESSAGE", element.device, element.message))
                 elif element is None:
                     # Either a bad element, or a NEW command
                     continue

@@ -94,9 +94,10 @@ class Event(ABC):
         if self.status in [EventStatus.Failed, EventStatus.Finished]:
             return
         try:
-            return self.cancel(cxn, cache)
+            self.cancel(cxn, cache)
         except Exception as e:
-            return EventStatus.Failed, f"Failed with exception {str(e)}"
+            self.status = EventStatus.Failed
+            self.msg = f"Failed with exception (cancel) {str(e)}"
 
     def _update(self, cxn, cache):
         if self.status in [EventStatus.Failed, EventStatus.Finished]:
@@ -112,7 +113,7 @@ class Event(ABC):
                 self.msg = "Failed to complete within the time limit"
         except Exception as e:
             self.status = EventStatus.Failed
-            self.msg = f"Failed with exception {str(e)}"
+            self.msg = f"Failed with exception (update) {str(e)}"
 
     def _trigger(self, cxn, cache):
         if self.status != EventStatus.Ready:
@@ -122,7 +123,7 @@ class Event(ABC):
             return self.trigger(cxn, cache)
         except Exception as e:
             self.status = EventStatus.Failed
-            self.msg = f"Failed with exception {str(e)}"
+            self.msg = f"Failed with exception (trigger) {str(e)}"
 
     def __lt__(self, other):
         return self.priority < other.priority
@@ -158,7 +159,7 @@ class SeriesEvent(Event):
             return self._event.cancel(cxn, cache)
 
     def trigger(self, cxn: Connection, cache: Cache):
-        raise NotImplementedError()
+        raise NotImplementedError("Trigger should not be called on Series Events")
 
     def _trigger(self, cxn: Connection, cache: Cache):
         self._start_time = time.time()

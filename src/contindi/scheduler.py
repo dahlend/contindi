@@ -46,14 +46,14 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
         click.echo("New cache, initializing.")
         cache.initialize()
 
-    cxn.set_camera_recv(send_here="Only")
+    cxn.set_camera_recv(send_here="Also")
 
     event_map = {}
 
     running = None
 
     while True:
-        time.sleep(0.5)
+        time.sleep(0.05)
         jobs = cache.get_jobs()
 
         for job in jobs:
@@ -76,7 +76,6 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
                 )
                 cache.update_job(job)
                 continue
-            click.echo("UPDATING EVENT MAP!")
             event_map[job.id] = event
         event_map = {k: v for k, v in sorted(event_map.items(), key=lambda x: x[1])}
 
@@ -97,12 +96,10 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
                 running = event
 
             if status == EventStatus.Finished:
-                click.echo(f"FINISHED {event} - {msg}")
                 delete.append(job_id)
                 job = job._replace(status="FINISHED", msg=msg)
                 cache.update_job(job)
             elif status == EventStatus.Failed:
-                click.echo(f"FAILED {str(event)} - {str(msg)}")
                 delete.append(job_id)
                 job = job._replace(status="FAILED", msg=msg)
                 cache.update_job(job)
@@ -110,7 +107,6 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
                 if job.status != "RUNNING":
                     job = job._replace(status="RUNNING", msg=msg)
                     cache.update_job(job)
-                    click.echo(f"UPDATE {str(job)}")
             elif status == EventStatus.NotReady:
                 pass
             elif status == EventStatus.Ready and trigger is None:
@@ -119,6 +115,7 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
             del event_map[job_id]
 
         if running is None and trigger is not None:
+            click.echo(f"Trigger Job ID: {str(trigger)}")
             job = cache.get_job(trigger)
             if job is None:
                 event_map[trigger]._cancel(cxn, cache)
@@ -127,7 +124,6 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
             trigger = event_map[trigger]
             job = job._replace(status="RUNNING", msg=msg)
             cache.update_job(job)
-            click.echo(f"TRIGGER {str(trigger)}")
             trigger._trigger(cxn, cache)
 
 
@@ -149,7 +145,7 @@ def parse_job(job: Job):
                 job.job, job.duration, job.priority, keep=True, private=job.private
             )
             event = event + filter + capture
-        # event = TimeConstrained(event, jd_start, jd_end)
+        event = TimeConstrained(event, jd_start, jd_end)
         return event
     elif cmd.upper() == "SYNC_INPLACE":
         filter = SetFilter(job.filter, job.priority)

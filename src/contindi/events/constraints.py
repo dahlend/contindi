@@ -41,10 +41,10 @@ class TimeConstrained(Event):
                 self.msg = "Event Ready after max time constraint met"
 
     def trigger(self, cxn, cache):
-        return self.event.trigger(cxn, cache)
+        return self.event._trigger(cxn, cache)
 
     def cancel(self, cxn, cache):
-        return self.event.cancel(cxn, cache)
+        return self.event._cancel(cxn, cache)
 
     def __repr__(self):
         return f"TimeConstrained({self.event.__repr__()}, '{self.start_time}', '{self.end_time}')"

@@ -1,7 +1,6 @@
 import kete
-import click
-from ..cache import Cache
 from .base import Event, EventStatus
+from ..cache import Cache
 from ..system import Connection
 from ..config import CONFIG
 
@@ -31,8 +30,6 @@ class Slew(Event):
         cur_vec = kete.Vector.from_ra_dec(cur_ra, cur_dec)
         target_vec = kete.Vector.from_ra_dec(self.ra, self.dec)
         angle = cur_vec.angle_between(target_vec)
-
-        click.echo(str((self.ra, self.dec, cur_ra, cur_dec, angle * 60 * 60)))
         return angle
 
     def trigger(self, cxn: Connection, _cache: Cache):
