@@ -11,32 +11,32 @@ from .capture import Capture
 class _Sync(Event):
     def __init__(self, priority=0):
         self.priority = priority
-        self._status = EventStatus.Ready
+        self.status = EventStatus.Ready
         self.attempts = 0
 
     def cancel(self, cxn: Connection, _cache: Cache):
         """Cancel the running event."""
-        self._status = EventStatus.Failed
+        self.status = EventStatus.Failed
+        self.msg = "Canceled"
 
-    def status(self, cxn: Connection, cache: Cache):
+    def update(self, cxn: Connection, cache: Cache):
         """Check the status of the event."""
-        if self._status != EventStatus.Running:
-            return self._status
+        if self.status != EventStatus.Running:
+            return
         frame = cache.get_latest_frame(where=" where job='sync' ")
         self.attempts += 1
         if frame is None:
             if self.attempts == 10:
-                self._status = EventStatus.Failed
-                return self._status, "Sync failed after 10 attempts."
+                self.status = EventStatus.Failed
+                self.msg = "Sync failed after 10 attempts."
             if self.attempts < 5:
                 time.sleep(0.5)
             else:
                 time.sleep(2)
-            return self._status, None
 
         if frame.solved == 0:
             # Solve not complete, dont delete frame
-            return self._status, None
+            return
         elif frame.solved == 1:
             cache.delete_frame(frame)
             fit_frame = frame.frame
@@ -52,20 +52,19 @@ class _Sync(Event):
             dec = vec.dec
             cxn.set_value(CONFIG.mount, "ON_COORD_SET", SYNC="On")
             cxn.set_value(CONFIG.mount, "EQUATORIAL_EOD_COORD", RA=ra, DEC=dec)
-            return EventStatus.Finished, "Sync complete"
+            self.status = EventStatus.Finished
         elif frame.solved == 2:
             cache.delete_frame(frame)
-            return EventStatus.Failed, "Solver failed to find solution"
+            self.status = EventStatus.Failed
+            self.msg = "Solver failed to find solution"
         else:
             cache.delete_frame(frame)
-            return (
-                EventStatus.Failed,
-                f"Solver returned solved state {frame.solved}, frame deleted.",
-            )
+            self.status = EventStatus.Failed
+            self.msg = f"Solver returned solved state {frame.solved}, frame deleted."
 
     def trigger(self, cxn: Connection, cache: Cache, remaining_attempts=5):
         """Trigger the beginning of the event."""
-        self._status = EventStatus.Running
+        self.status = EventStatus.Running
 
 
 def Sync(priority=0):

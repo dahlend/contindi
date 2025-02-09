@@ -61,14 +61,17 @@ class Event(ABC):
     priority: int
     """Priority of the event."""
 
-    max_time: float = dataclasses.field(default=120, repr=False)
+    max_time: float = dataclasses.field(default=45, repr=False)
     """Maximum length of time this may run for."""
 
     _start_time: Optional[float] = dataclasses.field(default=None, repr=False)
     """Reserved value to keep track of when the event is triggered."""
 
-    _status: EventStatus = dataclasses.field(default=EventStatus.NotReady, repr=False)
+    status: EventStatus = dataclasses.field(default=EventStatus.NotReady, repr=False)
     """Reserved value to keep track of when the current event status."""
+
+    msg: Optional[None] = dataclasses.field(default=None, repr=False)
+    """Reserved value for a status message."""
 
     @abstractmethod
     def cancel(
@@ -78,9 +81,7 @@ class Event(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def status(
-        self, cxn: Connection, cache: Cache
-    ) -> tuple[EventStatus, Optional[str]]:
+    def update(self, cxn: Connection, cache: Cache):
         """Check the status of the event."""
         raise NotImplementedError()
 
@@ -90,30 +91,38 @@ class Event(ABC):
         raise NotImplementedError()
 
     def _cancel(self, cxn, cache):
+        if self.status in [EventStatus.Failed, EventStatus.Finished]:
+            return
         try:
             return self.cancel(cxn, cache)
         except Exception as e:
             return EventStatus.Failed, f"Failed with exception {str(e)}"
 
-    def _get_status(self, cxn, cache) -> tuple[EventStatus, Optional[str]]:
+    def _update(self, cxn, cache):
+        if self.status in [EventStatus.Failed, EventStatus.Finished]:
+            return
         try:
-            status, msg = self.status(cxn, cache)
+            self.update(cxn, cache)
             if (
-                status == EventStatus.Running
+                self.status == EventStatus.Running
                 and (time.time() - self._start_time) > self.max_time
             ):
                 self._cancel(cxn, cache)
-                return EventStatus.Failed, "Failed to complete within the time limit"
-            return status, msg
+                self.status = EventStatus.Failed
+                self.msg = "Failed to complete within the time limit"
         except Exception as e:
-            return EventStatus.Failed, f"Failed with exception {str(e)}"
+            self.status = EventStatus.Failed
+            self.msg = f"Failed with exception {str(e)}"
 
     def _trigger(self, cxn, cache):
+        if self.status != EventStatus.Ready:
+            return
         self._start_time = time.time()
         try:
             return self.trigger(cxn, cache)
-        except Exception:
-            self._status = EventStatus.Failed
+        except Exception as e:
+            self.status = EventStatus.Failed
+            self.msg = f"Failed with exception {str(e)}"
 
     def __lt__(self, other):
         return self.priority < other.priority
@@ -140,26 +149,33 @@ class SeriesEvent(Event):
         self.current = 0
         self.max_time = sum([e.max_time for e in event_list]) + 10
 
+    @property
+    def _event(self):
+        return self.event_list[self.current]
+
     def cancel(self, cxn: Connection, cache: Cache):
         if self.current != len(self.event_list):
-            return self.event_list[self.current].cancel(cxn, cache)
+            return self._event.cancel(cxn, cache)
 
     def trigger(self, cxn: Connection, cache: Cache):
         raise NotImplementedError()
 
     def _trigger(self, cxn: Connection, cache: Cache):
         self._start_time = time.time()
-        self.event_list[self.current].trigger(cxn, cache)
+        self._event._trigger(cxn, cache)
 
-    def status(self, cxn: Connection, cache: Cache):
-        status, msg = self.event_list[self.current].status(cxn, cache)
-        while status == EventStatus.Finished:
+    def update(self, cxn: Connection, cache: Cache):
+        self._event.update(cxn, cache)
+        self.status = self._event.status
+        self.msg = self._event.msg
+        while self.status == EventStatus.Finished:
             if len(self.event_list) == self.current + 1:
-                return status, msg
+                return
             self.current += 1
             self._trigger(cxn, cache)
-            status, msg = self.event_list[self.current].status(cxn, cache)
-        return (status, msg)
+            self._event.update(cxn, cache)
+            self.status = self._event.status
+            self.msg = self._event.msg
 
     def __repr__(self):
         return f"SeriesEvent(priority={self.priority}, event_list={self.event_list})"

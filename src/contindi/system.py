@@ -190,11 +190,10 @@ class Connection:
         if block:
             t = time.time()
             while (time.time() - t) < timeout:
-                state = self.state
-                if state[dev_name][property_name].is_set(*args, **kwargs):
+                if self[dev_name][property_name].is_set(*args, **kwargs):
                     return None
 
-            raise ValueError("Timeout. Failed to set value in time.")
+            raise ValueError(f"Timeout. Failed to set value ({property_name}) in time.")
 
     def set_camera_recv(self, devs=None, send_here="Also"):
         """

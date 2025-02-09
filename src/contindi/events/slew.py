@@ -1,4 +1,5 @@
 import kete
+import click
 from ..cache import Cache
 from .base import Event, EventStatus
 from ..system import Connection
@@ -10,36 +11,36 @@ class Slew(Event):
         self.ra = ra
         self.dec = dec
         self.priority = priority
-        self._status = EventStatus.Ready
+        self.status = EventStatus.Ready
 
     def cancel(self, cxn: Connection, _cache: Cache):
         """Cancel the running event."""
         cxn.set_value(CONFIG.mount, "TELESCOPE_ABORT_MOTION", "On", block=False)
-        self._status = EventStatus.Failed
-        return self._status, "Slew cancelled, motion aborted"
+        self.status = EventStatus.Failed
+        self.msg = "Slew cancelled, motion aborted"
 
-    def status(self, cxn: Connection, _cache: Cache):
+    def update(self, cxn: Connection, _cache: Cache):
         """Check the status of the event."""
-        cur_dist = self._cur_dist(cxn)
 
-        if self._status == EventStatus.Running and cur_dist < 3 / 60 / 60:
-            self._status = EventStatus.Finished
-        return self._status, None
+        if self.status == EventStatus.Running and self._cur_dist(cxn) < 5 / 60 / 60:
+            self.status = EventStatus.Finished
 
     def _cur_dist(self, cxn):
         cur_ra, cur_dec = cxn[CONFIG.mount]["EQUATORIAL_EOD_COORD"].value
         cur_ra *= 360 / 24
         cur_vec = kete.Vector.from_ra_dec(cur_ra, cur_dec)
         target_vec = kete.Vector.from_ra_dec(self.ra, self.dec)
+        angle = cur_vec.angle_between(target_vec)
 
-        return cur_vec.angle_between(target_vec)
+        click.echo(str((self.ra, self.dec, cur_ra, cur_dec, angle * 60 * 60)))
+        return angle
 
     def trigger(self, cxn: Connection, _cache: Cache):
         """Trigger the beginning of the event."""
-        if self._cur_dist(cxn) < 3 / 60 / 60:
-            self._status = EventStatus.Finished
+        if self._cur_dist(cxn) < 5 / 60 / 60:
+            self.status = EventStatus.Finished
             return
-        self._status = EventStatus.Running
+        self.status = EventStatus.Running
         ra = self.ra / 360 * 24
         cxn.set_value(CONFIG.mount, "ON_COORD_SET", SLEW="On")
         cxn.set_value(

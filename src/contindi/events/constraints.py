@@ -25,21 +25,20 @@ class TimeConstrained(Event):
         self.event = event
         self.priority = event.priority
 
-    def status(self, cxn, cache):
+    def update(self, cxn, cache):
         # Get the current status, if it is ready, check if it is inside our
         # time limit.
-        status, msg = self.event.status(cxn, cache)
-        if status == EventStatus.Ready:
+        self.event.update(cxn, cache)
+        self.status = self.event.status
+        self.msg = self.event.msg
+        if self.status == EventStatus.Ready:
             cur_time = datetime.now(UTC)
             if self.start_time is not None and cur_time < self.start_time:
                 return (EventStatus.NotReady, None)
             if self.end_time is not None and cur_time > self.end_time:
                 self.event.cancel(cxn, cache)
-                return (
-                    EventStatus.Canceling,
-                    "Event Ready after max time constraint met",
-                )
-        return (status, msg)
+                self.status = self.event.status
+                self.msg = "Event Ready after max time constraint met"
 
     def trigger(self, cxn, cache):
         return self.event.trigger(cxn, cache)

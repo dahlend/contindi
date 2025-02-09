@@ -11,22 +11,23 @@ class Capture(Event):
         self.keep = keep
         self.private = private
         self.job_name = job_name
-        self._status = EventStatus.Ready
+        self.status = EventStatus.Ready
         self.timestamp = None
         self.max_time = duration + 5
 
     def cancel(self, cxn: Connection, _cache: Cache):
         """Cancel the running event."""
-        self._status = EventStatus.Failed
+        self.status = EventStatus.Failed
 
-    def status(self, cxn: Connection, cache: Cache):
+    def update(self, cxn: Connection, cache: Cache):
         """Check the status of the event."""
-        if self._status == EventStatus.Running:
+        if self.status == EventStatus.Running:
             cur_state = cxn[CONFIG.camera]["CCD1"]
             if self.timestamp != cur_state.timestamp:
-                self._status = EventStatus.Finished
+                self.status = EventStatus.Finished
                 if cache is None:
-                    return self._status, "No Cache found, image not saved."
+                    self.msg = "No Cache found, image not saved."
+                    return
                 cache.add_frame(
                     self.job_name,
                     cur_state.elements["CCD1"].frame,
@@ -34,12 +35,11 @@ class Capture(Event):
                     keep_frame=self.keep,
                     private=self.private,
                 )
-        return self._status, None
 
     def trigger(self, cxn: Connection, _cache: Cache):
         """Trigger the beginning of the event."""
         self.timestamp = cxn[CONFIG.camera]["CCD1"].timestamp
-        self._status = EventStatus.Running
+        self.status = EventStatus.Running
         cxn.set_value(CONFIG.camera, "CCD_EXPOSURE", self.duration, block=False)
 
     def __repr__(self):

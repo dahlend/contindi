@@ -11,22 +11,22 @@ class Delay(Event):
         """
         self.delay = timedelta(seconds=delay)
         self.priority = priority
-        self._status = EventStatus.Ready
+        self.status = EventStatus.Ready
         self._end_time = None
 
-    def status(self, _cxn, _cache):
+    def update(self, _cxn, _cache):
         cur_time = datetime.now(UTC)
         if (
-            self._status == EventStatus.Running
+            self.status == EventStatus.Running
             and self._end_time is not None
             and cur_time > self._end_time
         ):
-            self._status = EventStatus.Finished
-        return (self._status, None)
+            self.status = EventStatus.Finished
 
     def cancel(self, _cxn, _cache):
-        self._status = EventStatus.Failed
+        self.status = EventStatus.Failed
+        self.msg = "Canceled"
 
     def trigger(self, _cxn, _cache):
         self._end_time = datetime.now(UTC) + self.delay
-        self._status = EventStatus.Running
+        self.status = EventStatus.Running

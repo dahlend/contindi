@@ -53,7 +53,7 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
     running = None
 
     while True:
-        time.sleep(0.1)
+        time.sleep(0.5)
         jobs = cache.get_jobs()
 
         for job in jobs:
@@ -84,7 +84,9 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
         running = None
         delete = []
         for job_id, event in event_map.items():
-            status, msg = event._get_status(cxn, cache)
+            event._update(cxn, cache)
+            status = event.status
+            msg = event.msg
             job = cache.get_job(job_id)
             if job is None:
                 event_map[job_id].cancel(cxn, cache)
@@ -119,7 +121,7 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
         if running is None and trigger is not None:
             job = cache.get_job(trigger)
             if job is None:
-                event_map[trigger].cancel(cxn, cache)
+                event_map[trigger]._cancel(cxn, cache)
                 del event_map[trigger]
                 continue
             trigger = event_map[trigger]
