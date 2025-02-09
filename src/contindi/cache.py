@@ -19,25 +19,60 @@ class SolveStatus(Enum):
 _CACHE_SQL = """
 /* This defines the schema for the cache database. */
 
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE frames(
     id INTEGER PRIMARY KEY,
-    job TEXT not null,
-    time REAL UNIQUE not null,
-    frame BLOB not null,
-    private bool not null,
-    keep_frame bool not null,
-    duration REAL not null,
-    filter TEXT not null,
-    solved int not null
+    job TEXT NOT NULL,
+    time REAL UNIQUE NOT NULL,
+    frame BLOB NOT NULL,
+    private INTEGER NOT NULL,
+    keep_frame BOOL NOT NULL,
+    duration REAL NOT NULL,
+    filter TEXT NOT NULL,
+    solved int NOT NULL
 );
 
 CREATE INDEX obs_time ON frames (time);
+
+CREATE TABLE job_queue(
+    id INTEGER PRIMARY KEY,
+    job TEXT NOT NULL,
+    target TEXT NOT NULL,
+    priority INTEGER NOT NULL,
+    private INTEGER NOT NULL,
+    duration REAL NOT NULL,
+    filter TEXT NOT NULL,
+    jd_start REAL NOT NULL,
+    jd_end REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT "QUEUED",
+    msg TEXT DEFAULT NULL
+);
+
+/*
+Allowed target types:
+"FOCUS"
+"HOME"
+"SYNC_INPLACE"
+"STATIC ra(deg) dec(deg)"
+"SSO_STATE desig jd x y z vx vy vz"
+
+
+Allowed status:
+"QUEUED"
+"RUNNING"
+"FAILED"
+"FINISHED"
+*/
 """
+
 
 FrameMeta = namedtuple(
     "FrameMeta", "id, job, time, frame, private, keep_frame, duration, filter, solved"
+)
+
+
+Job = namedtuple(
+    "Job",
+    "id, job, target, priority, private, duration, filter, jd_start, jd_end, status, msg",
 )
 
 
@@ -50,7 +85,7 @@ def fits_to_binary(frame):
 
 
 class Cache:
-    def __init__(self, db_file="local_frames.db", timeout=10):
+    def __init__(self, db_file="local_cache.db", timeout=10):
         self.db_file = db_file
         self.con = sqlite3.connect(self.db_file, timeout=timeout)
 
@@ -60,6 +95,146 @@ class Cache:
                 self.con.executescript(_CACHE_SQL)
         except sqlite3.OperationalError as e:
             logger.error(e)
+
+    def add_static_exposure(
+        self, priority, jd_start, jd_end, job, ra, dec, duration, filter, private=False
+    ):
+        target = f"STATIC {ra} {dec}"
+
+        try:
+            with self.con:
+                self.con.execute(
+                    """ INSERT INTO job_queue
+                                  (job, target, priority, private, duration, filter, jd_start, jd_end)
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        job,
+                        target,
+                        priority,
+                        private,
+                        duration,
+                        filter,
+                        jd_start,
+                        jd_end,
+                    ),
+                )
+        except sqlite3.OperationalError as e:
+            logger.error(e)
+            pass
+
+    def add_focus(self, priority, jd_start, jd_end, duration=1, filter=""):
+        try:
+            with self.con:
+                self.con.execute(
+                    """ INSERT INTO job_queue
+                                  (job, target, priority, private, duration, filter, jd_start, jd_end)
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        "FOCUS",
+                        "FOCUS",
+                        priority,
+                        True,
+                        duration,
+                        filter,
+                        jd_start,
+                        jd_end,
+                    ),
+                )
+        except sqlite3.OperationalError as e:
+            logger.error(e)
+            pass
+
+    def add_sync(self, priority, jd_start, jd_end, duration=3, filter=""):
+        try:
+            with self.con:
+                self.con.execute(
+                    """ INSERT INTO job_queue
+                                  (job, target, priority, private, duration, filter, jd_start, jd_end)
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        "SYNC_INPLACE",
+                        "SYNC_INPLACE",
+                        priority,
+                        True,
+                        duration,
+                        filter,
+                        jd_start,
+                        jd_end,
+                    ),
+                )
+        except sqlite3.OperationalError as e:
+            logger.error(e)
+            pass
+
+    def add_home(self, priority, jd_start, jd_end):
+        try:
+            with self.con:
+                self.con.execute(
+                    """ INSERT INTO job_queue
+                                  (job, target, priority, private, duration, filter, jd_start, jd_end)
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        "HOME",
+                        "HOME",
+                        priority,
+                        True,
+                        0,
+                        "",
+                        jd_start,
+                        jd_end,
+                    ),
+                )
+        except sqlite3.OperationalError as e:
+            logger.error(e)
+            pass
+
+    def get_jobs(self, status="QUEUED"):
+        args = ", ".join([x for x in Job._fields])
+        try:
+            with self.con:
+                res = self.con.execute(
+                    f"""Select {args}
+                    from job_queue where status='{status}' ORDER BY priority asc"""
+                ).fetchall()
+                if res is None:
+                    return None
+            return [Job(*r) for r in res]
+        except sqlite3.OperationalError as e:
+            logger.error(e)
+
+    def get_job(self, id):
+        args = ", ".join([x for x in Job._fields])
+        try:
+            with self.con:
+                res = self.con.execute(
+                    f"""Select {args}
+                    from job_queue where id='{id}' ORDER BY priority asc"""
+                ).fetchone()
+                if res is None:
+                    return None
+            return Job(*res)
+        except sqlite3.OperationalError as e:
+            logger.error(e)
+
+    def update_job(self, job: Job):
+        args = ", ".join([x + "=?" for x in Job._fields])
+
+        try:
+            with self.con:
+                self.con.execute(
+                    "UPDATE job_queue SET " + args + f" where id={job.id}", job
+                )
+        except sqlite3.OperationalError as e:
+            logger.error(e)
+            pass
+
+    def delete_job(self, job: Job):
+        try:
+            with self.con:
+                self.con.execute(f"delete from job_queue where id={job.id};")
+        except sqlite3.OperationalError as e:
+            logger.error(e)
+            pass
 
     def add_frame(self, job, frame, solved, private=False, keep_frame=True):
         dat = fits_to_binary(frame)

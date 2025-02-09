@@ -14,12 +14,11 @@ class _Sync(Event):
         self._status = EventStatus.Ready
         self.attempts = 0
 
-    def cancel(self, cxn: Connection, _cache: Cache) -> EventStatus:
+    def cancel(self, cxn: Connection, _cache: Cache):
         """Cancel the running event."""
         self._status = EventStatus.Failed
-        return self._status, "Sync Failed"
 
-    def status(self, cxn: Connection, cache: Cache) -> EventStatus:
+    def status(self, cxn: Connection, cache: Cache):
         """Check the status of the event."""
         if self._status != EventStatus.Running:
             return self._status

@@ -15,7 +15,7 @@ class TextElement:
 
 @dataclasses.dataclass
 class TextVector(GenericVector):
-    elements: dict[TextElement]
+    elements: dict[str, TextElement]
 
     def create_xml_command(self, *args, **kwargs):
         kwargs = super().create_xml_command(*args, **kwargs)

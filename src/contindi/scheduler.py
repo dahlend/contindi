@@ -1,164 +1,158 @@
-import multiprocessing
-import signal
-import logging
 import time
+import kete
+import click
+import os
 from .system import Connection
-from .cache import Cache
-from .events import Event, EventStatus
+from .cache import Cache, Job
+from .events import EventStatus, Capture, SetFilter, Slew, TimeConstrained, Sync
 from .config import CONFIG
 
 
-logger = logging.getLogger(__name__)
+@click.command()
+@click.option("--mount", default="iOptron CEM70", help="INDI Name of the mount.")
+@click.option("--camera", default="ZWO CCD ASI533MM Pro", help="Name of the camera.")
+@click.option("--focus", default="iOptron CEM70", help="INDI Name of the focuser.")
+@click.option("--wheel", default="iOptron CEM70", help="INDI Name of the filter wheel.")
+@click.option("--host", default="localhost", help="Address of the INDI server.")
+@click.option("--port", default=7624, help="Port of the INDI server.")
+@click.option("--cache", default="local_cache.db", help="Cache sqlite database.")
+def run_schedule(mount, camera, focus, wheel, host, port, cache):
+    click.echo("Scheduler Running!")
 
+    conf = dict(
+        MOUNT=mount,
+        CAMERA=camera,
+        FOCUS=focus,
+        WHEEL=wheel,
+        HOST=(host, port),
+        CACHE=cache,
+    )
+    CONFIG.update(conf)
 
-class Scheduler:
-    """
-    Greedy scheduler for running `Event`s.
+    click.echo("Config set to:")
+    for key, value in CONFIG.items():
+        click.echo(f"\t{key:<10s} : {value}")
 
-    Keeps track of a sorted list of `Event` objects, checking them in order for the
-    highest priority one which has its constraints satisfied. This event is run and
-    the scheduler waits for completion of the event before repeating the process.
+    cxn = Connection(host=host, port=port)
 
-    Only one event is ever active at a time.
-    """
+    state = cxn.state
+    for dev in state.data.keys():
+        if dev not in CONFIG.values():
+            click.echo(f"\t{dev} not found in config")
 
-    timeout = 10
+    cache_init = not os.path.isfile(cache)
+    cache = Cache(cache)
+    if cache_init:
+        click.echo("New cache, initializing.")
+        cache.initialize()
 
-    def __init__(self):
-        self.task_queue = multiprocessing.Queue()
-        self.response_queue = multiprocessing.Queue()
-        self.process = None
-        self.connect()
+    cxn.set_camera_recv()
 
-    def connect(self):
-        if self.is_connected:
-            # already connected
-            return
-        elif self.process is not None:
-            del self.process
-        self.process = multiprocessing.Process(
-            target=self._process_tasks,
-            args=(self.task_queue, self.response_queue, CONFIG),
-        )
-        # Ensures process exits when main program ends
-        self.process.start()
+    event_map = {}
 
-    @property
-    def is_connected(self):
-        if self.process is None:
-            return False
-        return self.process.is_alive()
+    running = None
 
-    def add_event(self, event: Event):
-        self.task_queue.put(("event", event))
+    while True:
+        jobs = {j.id: j for j in cache.get_jobs()}
 
-    def status(self):
-        self.task_queue.put(("status", None))
+        # if there is nothing to do, chill for bit.
+        if len(jobs) == 0:
+            time.sleep(0.1)
+            continue
 
-    def cancel(self):
-        self.task_queue.put(("clear", None))
+        for job in jobs.values():
+            if job.id in event_map:
+                continue
+            try:
+                event = parse_job(job)
+            except Exception as e:
+                click.echo(f"JOB FAILED TO PARSE {str(job)} - {str(e)}")
+                job = job._replace(
+                    status="FAILED", msg=f"Failed to parse job: {str(e)}"
+                )
+                cache.update_job(job)
+                continue
+            event_map[job.id] = event
+        click.echo(event_map)
+        event_map = {k: v for k, v in sorted(event_map.items(), key=lambda x: x[1])}
 
-    def close(self):
-        """
-        Close the connection.
-        """
-        self.task_queue.put(("stop", None))
-        self.process.terminate()
-
-    @staticmethod
-    def _process_tasks(task_queue: multiprocessing.Queue, response_queue, config):
-        """
-        Threaded process which keeps track of the server connection and data packets.
-        """
-        CONFIG.update(config)
-        # Ignore interrupt signals
-        # this allows keyboard interrupts to run without issue
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-        event_list = []
-        cxn = Connection(*CONFIG.host)
-        cxn.set_camera_recv()
-
-        if CONFIG.cache is not None:
-            cache = Cache(CONFIG.cache)
-        else:
-            cache = None
+        trigger = None
         running = None
+        for job_id, event in event_map.items():
+            status, msg = event._get_status(cxn, cache)
+            job = cache.get_job(job_id)
 
-        while True:
-            # if there is nothing to do, chill for bit.
-            if len(event_list) == 0 and task_queue.empty():
-                time.sleep(0.05)
+            if status == EventStatus.Running:
+                running = event
 
-            # Get new commands from queue
-            while not task_queue.empty():
-                # Get the next command and possibly event
-                cmd, value = task_queue.get_nowait()
+            if status == EventStatus.Finished:
+                click.echo("FINISHED %s - %s", event, msg)
+                del event_map[job_id]
+                job = job._replace(status="FINISHED", msg=msg)
+                cache.update_job(job)
+            elif status == EventStatus.Failed:
+                click.echo(f"FAILED {str(event)} - {str(msg)}")
+                del event_map[job_id]
+                job = job._replace(status="FAILED", msg=msg)
+                cache.update_job(job)
+            elif status == EventStatus.Running or status == EventStatus.Canceling:
+                job = job._replace(status="RUNNING", msg=msg)
+                cache.update_job(job)
 
-                if cmd == "stop":
-                    logger.error("Closing Connection!")
-                    cxn.close()
-                    return
-                elif cmd == "clear":
-                    logger.warning("Clearing event list, %s removed ", len(event_list))
-                    if running is not None:
-                        logger.warning("%s Cancelling", running)
-                        _, msg = running._cancel(cxn, cache)
-                        event_list = [running]
-                    else:
-                        event_list = []
-                elif cmd == "status":
-                    if running is not None:
-                        logger.warning("%s Running", running)
-                    if len(event_list) > 0:
-                        logger.warning("%s remaining in queue", len(event_list))
-                    else:
-                        logger.warning("Waiting for new jobs")
-                elif cmd == "event":
-                    if not isinstance(value, Event):
-                        logger.error(
-                            "Submitted object is not an Event, ignoring it %s",
-                            str(value),
-                        )
-                        continue
-                    status, msg = value._get_status(cxn, cache)
-                    if status == EventStatus.Failed:
-                        logger.error(
-                            "Event %s Failed with message:  %s", str(value), str(msg)
-                        )
-                    if status.is_started:
-                        logger.error(
-                            "This event has already occurred, ignoring it %s - %s",
-                            str(value),
-                            str(status),
-                        )
-                        continue
-                    event_list.append(value)
-                    event_list.sort()
-                else:
-                    logger.error("Unkown Command")
+                click.echo(f"UPDATE {str(job)}")
+            elif status == EventStatus.NotReady:
+                pass
+            elif status == EventStatus.Ready and trigger is None:
+                trigger = job_id
 
-            keep = []
-            trigger = None
-            running = None
-            for event in event_list:
-                status, msg = event._get_status(cxn, cache)
-                logger.debug("%s - %s", event, str(status))
-                if msg is not None:
-                    logger.error(msg)
-                if status.is_active:
-                    running = event
-                if not status.is_done:
-                    keep.append(event)
-                    if trigger is None and status == EventStatus.Ready:
-                        trigger = event
-                else:
-                    logger.info("%s - Finished with %s", event, str(status))
-            event_list = keep
+        if running is None and trigger is not None:
+            job = jobs[trigger]
+            trigger = event_map[trigger]
+            job = job._replace(status="RUNNING", msg=msg)
+            cache.update_job(job)
+            click.echo(f"TRIGGER {str(trigger)}")
+            trigger._trigger(cxn, cache)
 
-            if running is None and trigger is not None:
-                logger.info("%s - Triggered", trigger)
-                trigger._trigger(cxn, cache)
 
-    def __del__(self):
-        self.close()
+def parse_job(job: Job):
+    jd_start = kete.Time(job.jd_start).to_datetime()
+    jd_end = kete.Time(job.jd_end).to_datetime()
+    cmd, *args = job.target.split()
+    if cmd.upper() == "STATIC":
+        ra, dec = args
+        ra = float(ra)
+        dec = float(dec)
+        filters = list(job.filter)
+
+        # slew to position, cycle through filters and capture
+        event = Slew(ra, dec, job.priority)
+        for filt in filters:
+            filter = SetFilter(filt, job.priority)
+            capture = Capture(
+                job.job, job.duration, job.priority, keep=True, private=job.private
+            )
+            event = event + filter + capture
+        # event = TimeConstrained(event, jd_start, jd_end)
+        return event
+    elif cmd.upper() == "SYNC_INPLACE":
+        filter = SetFilter(job.filter, job.priority)
+        sync = Sync(job.priority)
+        event = filter + sync
+        event = TimeConstrained(event, jd_start, jd_end)
+        return event
+
+    raise ValueError(f"Unknown command {cmd}")
+
+
+@click.command()
+@click.option("--host", default="localhost", help="Address of the INDI server.")
+@click.option("--port", default=7624, help="Port of the INDI server.")
+def find_devices(host, port):
+    click.echo("Looking for devices:")
+
+    cxn = Connection(host=host, port=port)
+
+    state = cxn.state
+
+    for dev in state.data.keys():
+        click.echo(f"\t{dev}")

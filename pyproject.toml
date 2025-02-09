@@ -7,7 +7,7 @@ authors = [{name = "Dar Dahlen", email = "dardahlen@gmail.com"}]
 license = {text = "MIT"}
 requires-python = ">=3.9"
 classifiers=["Programming Language :: Python :: 3"]
-dependencies = ["astropy>=5.3.4"]
+dependencies = ["astropy>=5.3.4", "kete", "click"]
 
 [project.urls]
 homepage = "https://github.com/dahlend/contindi"
@@ -18,6 +18,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+[project.scripts]
+scheduler = "contindi.scheduler:run_schedule"
+find_devices = "contindi.scheduler:find_devices"
 
 [project.optional-dependencies]
 dev = ["black>=23.1.0",

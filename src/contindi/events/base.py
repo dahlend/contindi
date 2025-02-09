@@ -102,7 +102,7 @@ class Event(ABC):
                 status == EventStatus.Running
                 and (time.time() - self._start_time) > self.max_time
             ):
-                self._cancel()
+                self._cancel(cxn, cache)
                 return EventStatus.Failed, "Failed to complete within the time limit"
             return status, msg
         except Exception as e:

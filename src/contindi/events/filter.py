@@ -11,12 +11,11 @@ class SetFilter(Event):
         self._status = EventStatus.Ready
         self.slot_id = None
 
-    def cancel(self, cxn: Connection, _cache: Cache) -> EventStatus:
+    def cancel(self, cxn: Connection, _cache: Cache):
         """Cancel the running event."""
         self._status = EventStatus.Failed
-        return self._status, "Filter change cancelled"
 
-    def status(self, cxn: Connection, cache: Cache) -> EventStatus:
+    def status(self, cxn: Connection, cache: Cache):
         """Check the status of the event."""
         if self._status == EventStatus.Running:
             cur_state = cxn.state[CONFIG.wheel]["FILTER_SLOT"]
@@ -32,4 +31,4 @@ class SetFilter(Event):
             lookup[elem.value] = idx
         self.slot_id = lookup[self.filt]
         cxn.set_value(CONFIG.wheel, "FILTER_SLOT", self.slot_id, block=False)
-        self._status = EventStatus.Running, f"Filter changing to {repr(self.filt)}"
+        self._status = EventStatus.Running

@@ -1,5 +1,5 @@
 from .base import Event, EventStatus
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 
 class Delay(Event):
@@ -15,7 +15,7 @@ class Delay(Event):
         self._end_time = None
 
     def status(self, _cxn, _cache):
-        cur_time = datetime.now()
+        cur_time = datetime.now(UTC)
         if (
             self._status == EventStatus.Running
             and self._end_time is not None
@@ -28,5 +28,5 @@ class Delay(Event):
         self._status = EventStatus.Failed
 
     def trigger(self, _cxn, _cache):
-        self._end_time = datetime.now() + self.delay
+        self._end_time = datetime.now(UTC) + self.delay
         self._status = EventStatus.Running

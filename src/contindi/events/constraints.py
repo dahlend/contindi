@@ -3,7 +3,7 @@ Constraints on events, IE: time or geometry
 """
 
 from .base import Event, EventStatus
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional
 
 
@@ -30,7 +30,7 @@ class TimeConstrained(Event):
         # time limit.
         status, msg = self.event.status(cxn, cache)
         if status == EventStatus.Ready:
-            cur_time = datetime.now()
+            cur_time = datetime.now(UTC)
             if self.start_time is not None and cur_time < self.start_time:
                 return (EventStatus.NotReady, None)
             if self.end_time is not None and cur_time > self.end_time:

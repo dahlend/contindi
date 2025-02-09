@@ -15,12 +15,11 @@ class Capture(Event):
         self.timestamp = None
         self.max_time = duration + 5
 
-    def cancel(self, cxn: Connection, _cache: Cache) -> EventStatus:
+    def cancel(self, cxn: Connection, _cache: Cache):
         """Cancel the running event."""
         self._status = EventStatus.Failed
-        return self._status, "Capture was cancelled."
 
-    def status(self, cxn: Connection, cache: Cache) -> EventStatus:
+    def status(self, cxn: Connection, cache: Cache):
         """Check the status of the event."""
         if self._status == EventStatus.Running:
             cur_state = cxn[CONFIG.camera]["CCD1"]
