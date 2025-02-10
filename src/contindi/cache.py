@@ -144,31 +144,3 @@ class Cache:
         except Exception as e:
             logger.error("Failed to submit job: %s", e.data)
             raise
-
-    # def delete_job(self, job: Job):
-    #     try:
-    #         with self.con:
-    #             self.con.execute(f"delete from job_queue where id={job.id};")
-    #     except sqlite3.OperationalError as e:
-    #         logger.error(e)
-    #         pass
-
-    # def get_latest_frame(self, where=None):
-    #     where = "" if where is None else where
-
-    #     try:
-    #         with self.con:
-    #             res = self.con.execute(
-    #                 f"Select * from frames {where} ORDER BY time desc LIMIT 1"
-    #             ).fetchone()
-    #             if res is None:
-    #                 return None
-    #             res = list(res)
-    #         res[3] = fits.HDUList.fromstring(res[3])[0]
-    #         res[8] = SolveStatus(res[8])
-    #         return FrameMeta(*res)
-    #     except sqlite3.OperationalError as e:
-    #         logger.error(e)
-
-    # def __del__(self):
-    #     self.con.close()
