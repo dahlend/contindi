@@ -1,7 +1,7 @@
 # contindi
 CONtrolling a Telescope using INDI - Simple Python client for INDI
 
-!!This is a work in progress!!
+**!!Work in progress!!**
 
 This project is broken into several components:
 
