@@ -43,7 +43,7 @@ class Slew(Event):
             self.status = EventStatus.Finished
             cache.update_job(
                 self.job_id,
-                log="Slew not done, within 5 arcseconds of target.",
+                log="Slew skipped, within 5 arcseconds of target.",
             )
             return
         self.status = EventStatus.Running

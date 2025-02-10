@@ -1,5 +1,6 @@
 from ..config import CONFIG
 from .base import Event, EventStatus
+from ..cache import SolveStatus
 
 
 class Capture(Event):
@@ -17,6 +18,7 @@ class Capture(Event):
 
     def update(self, cxn, cache):
         """Check the status of the event."""
+
         if self.status == EventStatus.Running:
             cur_state = cxn[CONFIG.camera]["CCD1"]
             if self.timestamp != cur_state.timestamp:
@@ -25,6 +27,7 @@ class Capture(Event):
                     cache.update_job(
                         self.job_id,
                         log="Exposure complete",
+                        solve=SolveStatus.UNSOLVED,
                     )
                     self.status = EventStatus.Finished
                 except Exception as e:

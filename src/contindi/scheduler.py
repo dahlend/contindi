@@ -1,10 +1,9 @@
 import time
 import click
-from ..connection import Connection
-from ..events import EventStatus
-from ..config import CONFIG
-from .cache import PBCache
-from .jobs import JobStatus
+from .connection import Connection
+from .config import CONFIG
+from .cache import PBCache, CaptureStatus
+from .events import parse_job, EventStatus
 
 
 @click.command()
@@ -54,22 +53,22 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
         for job in jobs:
             if job.id in event_map:
                 continue
-            if job.status in [JobStatus.FINISHED, JobStatus.FAILED]:
+            if job.capture_status in [CaptureStatus.FINISHED, CaptureStatus.FAILED]:
                 continue
-            if job.status == JobStatus.RUNNING:
+            if job.capture_status == CaptureStatus.RUNNING:
                 cache.update_job(
                     job.id,
-                    status=JobStatus.FAILED,
+                    capture_status=CaptureStatus.FAILED,
                     log="Job was running, but no event found.",
                 )
                 continue
             try:
-                event = job.parse_job()
+                event = parse_job(job)
             except Exception as e:
                 click.echo(f"JOB FAILED TO PARSE {str(job)} - {str(e)}")
                 cache.update_job(
                     job.id,
-                    status=JobStatus.FAILED,
+                    capture_status=CaptureStatus.FAILED,
                     log=f"Failed to parse job: {str(e)}",
                 )
                 continue
@@ -94,13 +93,17 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
             if status == EventStatus.Finished:
                 delete.append(job_id)
                 click.echo(f"Finished Job ID: {str(job_id)}")
-                cache.update_job(job.id, status=JobStatus.FINISHED, log="Finished")
+                cache.update_job(
+                    job.id, capture_status=CaptureStatus.FINISHED, log="Finished"
+                )
             elif status == EventStatus.Failed:
                 delete.append(job_id)
-                cache.update_job(job.id, status=JobStatus.FAILED, log="Failed")
+                cache.update_job(
+                    job.id, capture_status=CaptureStatus.FAILED, log="Failed"
+                )
             elif status == EventStatus.Running or status == EventStatus.Canceling:
-                if job.status != JobStatus.RUNNING:
-                    cache.update_job(job.id, status=JobStatus.RUNNING)
+                if job.capture_status != CaptureStatus.RUNNING:
+                    cache.update_job(job.id, capture_status=CaptureStatus.RUNNING)
             elif status == EventStatus.NotReady:
                 pass
             elif status == EventStatus.Ready and trigger is None:
@@ -116,7 +119,7 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
                 del event_map[trigger]
                 continue
             trigger = event_map[trigger]
-            cache.update_job(job.id, status=JobStatus.RUNNING)
+            cache.update_job(job.id, capture_status=CaptureStatus.RUNNING)
             trigger._trigger(cxn, cache)
 
 

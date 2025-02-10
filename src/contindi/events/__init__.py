@@ -36,3 +36,42 @@ def jnow(self, jd=None):
 
 # monkey patch Vector to use this
 kete.Vector.jnow = jnow
+
+
+def parse_job(job):
+    """
+    Convert Job into an Event.
+    """
+
+    # Allowed cmd types:
+    # "FOCUS"
+    # "HOME"
+    # "SYNC_INPLACE"
+    # "STATIC ra(deg) dec(deg)"
+    # "SSO_STATE desig jd x y z vx vy vz"
+
+    utc_start = kete.Time(job.jd_start, scaling="utc").to_datetime()
+    utc_end = kete.Time(job.jd_end, scaling="utc").to_datetime()
+    cmd, *args = job.cmd.split()
+    if cmd.upper() == "STATIC":
+        ra, dec = args
+        ra = float(ra)
+        dec = float(dec)
+        filters = list(job.filter)
+
+        # slew to position, cycle through filters and capture
+        event = Slew(job.id, ra, dec, job.priority)
+        for filt in filters:
+            filter = SetFilter(job.id, filt, job.priority)
+            capture = Capture(job.id, job.duration, job.priority)
+            event = event + filter + capture
+        event = TimeConstrained(event, utc_start, utc_end)
+        return event
+    elif cmd.upper() == "SYNC_INPLACE":
+        filter = SetFilter(job.id, job.filter, job.priority)
+        sync = Sync(job.id, job.priority)
+        event = filter + sync
+        event = TimeConstrained(event, utc_start, utc_end)
+        return event
+
+    raise ValueError(f"Unknown command {cmd}")

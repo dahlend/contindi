@@ -1,17 +1,17 @@
 import dataclasses
-from enum import Enum
 from abc import abstractmethod, ABC
 from typing import Optional
 import time
+from enum import Enum
 from ..connection import Connection
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ..scheduler.cache import PBCache
+from ..cache import PBCache
 
 
 class EventStatus(Enum):
+    """
+    Internal status for events.
+    """
+
     NotReady = 0
     Ready = 1
     Running = 2

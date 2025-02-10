@@ -3,6 +3,7 @@ import time
 from astropy.wcs import WCS
 from .base import Event, EventStatus, SeriesEvent
 from ..config import CONFIG
+from ..cache import SolveStatus
 from .capture import Capture
 from pocketbase.client import ClientResponseError
 
@@ -21,7 +22,6 @@ class _Sync(Event):
 
     def update(self, cxn, cache):
         """Check the status of the event."""
-        from ..scheduler.jobs import SolveStatus
 
         if self.status != EventStatus.Running:
             return
