@@ -3,11 +3,28 @@ CONtrolling a Telescope using INDI - Simple Python client for INDI
 
 !!This is a work in progress!!
 
+This project is broken into several components:
+
+- Basic control a personal telescope using INDI, using the `Connection` class.
+  This allows for direct commands to be sent and recieved over python to an INDI server.
+- A Scheduling server, which allows for jobs to be queued, and post processing to be
+  run. This scheduling server uses the open source PocketBase as the primary software
+  backend, enabling easy configuration of users and authentication.
+
+This scheduling server does not need to be used at all if you just wish to control
+your personal telescope.
+
+Status:
+- [x] - `Connection` - The basic communication via INDI is implemented and working.
+- [ ] - `Scheduling Server` - This is starting to come together, but larger details
+    still need to be sorted out.
+
+
+## Example of direct connection to an INDI server
+
 This is a pure python implementation of the INDI standard:
 http://docs.indilib.org/protocol/INDI.pdf
 
-A very simple INDI client to connect to a telescope without a GUI.
-This is NOT an INDI server.
 
 ``` python
 
@@ -41,12 +58,11 @@ This is NOT an INDI server.
     cxn.state['CCD']['CCD1'].frame
 ```
 
-## Technical Details
+### Technical Details
 
-This uses multi-core processing to handle the connection to the INDI server.
-A seperate thread is constantly reading from the server connection, and the main
-thread can request a copy of the current state of the system. This means images
-are received and stored in the second thread, and only on request copied to the
-main thread. You can then do fun things, like command a series of 10 second
-exposures, grab them as they come in, and do processing while the second thread
-handles the download.
+The above example uses multi-core processing to handle the connection to the INDI
+server. A seperate thread is constantly reading from the server connection, and
+the main thread can request a copy of the current state of the system. This means
+images are received and stored in the second thread, and only on request copied to
+the main thread.
+
