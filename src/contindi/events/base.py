@@ -3,8 +3,12 @@ from enum import Enum
 from abc import abstractmethod, ABC
 from typing import Optional
 import time
-from ..system import Connection
-from ..cache import Cache
+from ..connection import Connection
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..scheduler.cache import PBCache
 
 
 class EventStatus(Enum):
@@ -58,6 +62,9 @@ class Event(ABC):
     If an event needs to be canceled while running, the `cancel` method will be called.
     """
 
+    job_id: str
+    """Job ID as stored in the cache"""
+
     priority: int
     """Priority of the event."""
 
@@ -70,23 +77,20 @@ class Event(ABC):
     status: EventStatus = dataclasses.field(default=EventStatus.NotReady, repr=False)
     """Reserved value to keep track of when the current event status."""
 
-    msg: Optional[None] = dataclasses.field(default=None, repr=False)
-    """Reserved value for a status message."""
-
     @abstractmethod
     def cancel(
-        self, cxn: Connection, cache: Cache
+        self, cxn: Connection, cache: "PBCache"
     ) -> tuple[EventStatus, Optional[str]]:
         """Cancel the running event."""
         raise NotImplementedError()
 
     @abstractmethod
-    def update(self, cxn: Connection, cache: Cache):
+    def update(self, cxn: Connection, cache: "PBCache"):
         """Check the status of the event."""
         raise NotImplementedError()
 
     @abstractmethod
-    def trigger(self, cxn: Connection, cache: Cache):
+    def trigger(self, cxn: Connection, cache: "PBCache"):
         """Trigger the beginning of the event."""
         raise NotImplementedError()
 
@@ -97,7 +101,9 @@ class Event(ABC):
             self.cancel(cxn, cache)
         except Exception as e:
             self.status = EventStatus.Failed
-            self.msg = f"Failed with exception (cancel) {str(e)}"
+            cache.update_job(
+                self.job_id, log=f"Failed with exception (cancel) {str(e)}"
+            )
 
     def _update(self, cxn, cache):
         if self.status in [EventStatus.Failed, EventStatus.Finished]:
@@ -110,10 +116,14 @@ class Event(ABC):
             ):
                 self._cancel(cxn, cache)
                 self.status = EventStatus.Failed
-                self.msg = "Failed to complete within the time limit"
+                cache.update_job(
+                    self.job_id, log="Failed to complete within the time limit"
+                )
         except Exception as e:
             self.status = EventStatus.Failed
-            self.msg = f"Failed with exception (update) {str(e)}"
+            cache.update_job(
+                self.job_id, log=f"Failed with exception (update) {str(e)}"
+            )
 
     def _trigger(self, cxn, cache):
         if self.status != EventStatus.Ready:
@@ -123,7 +133,9 @@ class Event(ABC):
             return self.trigger(cxn, cache)
         except Exception as e:
             self.status = EventStatus.Failed
-            self.msg = f"Failed with exception (trigger) {str(e)}"
+            cache.update_job(
+                self.job_id, log=f"Failed with exception (trigger) {str(e)}"
+            )
 
     def __lt__(self, other):
         return self.priority < other.priority
@@ -138,11 +150,21 @@ class Event(ABC):
             event_list.extend(other.event_list)
         else:
             event_list.append(other)
-        return SeriesEvent(priority=self.priority, event_list=event_list)
+        if len(set([e.job_id for e in event_list])) != 1:
+            print(event_list)
+            raise ValueError(
+                "Multiple job IDs found, events can only be combined if they are the same job id."
+            )
+        return SeriesEvent(
+            job_id=event_list[0].job_id,
+            priority=self.priority,
+            event_list=event_list,
+        )
 
 
 class SeriesEvent(Event):
-    def __init__(self, priority: int, event_list: list[Event]):
+    def __init__(self, job_id, priority: int, event_list: list[Event]):
+        self.job_id = job_id
         self.priority = priority
         self.event_list = event_list
         if len(self.event_list) == 0:
@@ -154,21 +176,20 @@ class SeriesEvent(Event):
     def _event(self):
         return self.event_list[self.current]
 
-    def cancel(self, cxn: Connection, cache: Cache):
+    def cancel(self, cxn: Connection, cache: "PBCache"):
         if self.current != len(self.event_list):
             return self._event.cancel(cxn, cache)
 
-    def trigger(self, cxn: Connection, cache: Cache):
+    def trigger(self, cxn: Connection, cache: "PBCache"):
         raise NotImplementedError("Trigger should not be called on Series Events")
 
-    def _trigger(self, cxn: Connection, cache: Cache):
+    def _trigger(self, cxn: Connection, cache: "PBCache"):
         self._start_time = time.time()
         self._event._trigger(cxn, cache)
 
-    def update(self, cxn: Connection, cache: Cache):
+    def update(self, cxn: Connection, cache: "PBCache"):
         self._event.update(cxn, cache)
         self.status = self._event.status
-        self.msg = self._event.msg
         while self.status == EventStatus.Finished:
             if len(self.event_list) == self.current + 1:
                 return
@@ -176,7 +197,6 @@ class SeriesEvent(Event):
             self._trigger(cxn, cache)
             self._event.update(cxn, cache)
             self.status = self._event.status
-            self.msg = self._event.msg
 
     def __repr__(self):
         return f"SeriesEvent(priority={self.priority}, event_list={self.event_list})"

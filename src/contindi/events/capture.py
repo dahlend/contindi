@@ -1,5 +1,3 @@
-from ..cache import Cache
-from ..system import Connection
 from ..config import CONFIG
 from .base import Event, EventStatus
 
@@ -13,24 +11,36 @@ class Capture(Event):
         self.timestamp = None
         self.max_time = duration + 5
 
-    def cancel(self, cxn: Connection, _cache: Cache):
+    def cancel(self, cxn, _cache):
         """Cancel the running event."""
         self.status = EventStatus.Failed
 
-    def update(self, cxn: Connection, cache: Cache):
+    def update(self, cxn, cache):
         """Check the status of the event."""
         if self.status == EventStatus.Running:
             cur_state = cxn[CONFIG.camera]["CCD1"]
             if self.timestamp != cur_state.timestamp:
                 try:
                     cache.add_frame(self.job_id, cur_state.elements["CCD1"].frame)
+                    cache.update_job(
+                        self.job_id,
+                        log="Exposure complete",
+                    )
                     self.status = EventStatus.Finished
                 except Exception as e:
                     self.status = EventStatus.Failed
-                    self.msg = f"Failed to upload file! {e}"
+                    cache.update_job(
+                        self.job_id,
+                        log=f"Exposure failed to upload file: {e}",
+                    )
 
-    def trigger(self, cxn: Connection, _cache: Cache):
+    def trigger(self, cxn, cache):
         """Trigger the beginning of the event."""
+        cache.update_job(
+            self.job_id,
+            log=f"Exposure for {self.duration} seconds",
+        )
+
         self.timestamp = cxn[CONFIG.camera]["CCD1"].timestamp
         self.status = EventStatus.Running
         cxn.set_value(CONFIG.camera, "CCD_EXPOSURE", self.duration, block=False)

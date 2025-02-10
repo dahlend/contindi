@@ -1,10 +1,10 @@
 import time
-import kete
 import click
-from .system import Connection
-from .cache import Cache, Job, JobStatus
-from .events import EventStatus, Capture, SetFilter, Slew, TimeConstrained, Sync
-from .config import CONFIG
+from ..connection import Connection
+from ..events import EventStatus
+from ..config import CONFIG
+from .cache import PBCache
+from .jobs import JobStatus
 
 
 @click.command()
@@ -39,7 +39,7 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
         if dev not in CONFIG.values():
             click.echo(f"\t{dev} not found in config")
 
-    cache = Cache(cache)
+    cache = PBCache(cache)
 
     cxn.set_camera_recv(send_here="Also")
 
@@ -60,17 +60,17 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
                 cache.update_job(
                     job.id,
                     status=JobStatus.FAILED,
-                    msg="Job was running, but no event found.",
+                    log="Job was running, but no event found.",
                 )
                 continue
             try:
-                event = parse_job(job)
+                event = job.parse_job()
             except Exception as e:
                 click.echo(f"JOB FAILED TO PARSE {str(job)} - {str(e)}")
                 cache.update_job(
                     job.id,
                     status=JobStatus.FAILED,
-                    msg=f"Failed to parse job: {str(e)}",
+                    log=f"Failed to parse job: {str(e)}",
                 )
                 continue
             event_map[job.id] = event
@@ -82,7 +82,6 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
         for job_id, event in event_map.items():
             event._update(cxn, cache)
             status = event.status
-            msg = event.msg
             job = cache.get_job(job_id)
             if job is None:
                 event_map[job_id].cancel(cxn, cache)
@@ -95,13 +94,13 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
             if status == EventStatus.Finished:
                 delete.append(job_id)
                 click.echo(f"Finished Job ID: {str(job_id)}")
-                cache.update_job(job.id, status=JobStatus.FINISHED, msg=msg)
+                cache.update_job(job.id, status=JobStatus.FINISHED, log="Finished")
             elif status == EventStatus.Failed:
                 delete.append(job_id)
-                cache.update_job(job.id, status=JobStatus.FAILED, msg=msg)
+                cache.update_job(job.id, status=JobStatus.FAILED, log="Failed")
             elif status == EventStatus.Running or status == EventStatus.Canceling:
                 if job.status != JobStatus.RUNNING:
-                    cache.update_job(job.id, status=JobStatus.RUNNING, msg=msg)
+                    cache.update_job(job.id, status=JobStatus.RUNNING)
             elif status == EventStatus.NotReady:
                 pass
             elif status == EventStatus.Ready and trigger is None:
@@ -117,36 +116,8 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
                 del event_map[trigger]
                 continue
             trigger = event_map[trigger]
-            cache.update_job(job.id, status=JobStatus.RUNNING, msg=msg)
+            cache.update_job(job.id, status=JobStatus.RUNNING)
             trigger._trigger(cxn, cache)
-
-
-def parse_job(job: Job):
-    jd_start = kete.Time(job.jd_start).to_datetime()
-    jd_end = kete.Time(job.jd_end).to_datetime()
-    cmd, *args = job.cmd.split()
-    if cmd.upper() == "STATIC":
-        ra, dec = args
-        ra = float(ra)
-        dec = float(dec)
-        filters = list(job.filter)
-
-        # slew to position, cycle through filters and capture
-        event = Slew(ra, dec, job.priority)
-        for filt in filters:
-            filter = SetFilter(filt, job.priority)
-            capture = Capture(job.id, job.duration, job.priority)
-            event = event + filter + capture
-        event = TimeConstrained(event, jd_start, jd_end)
-        return event
-    elif cmd.upper() == "SYNC_INPLACE":
-        filter = SetFilter(job.filter, job.priority)
-        sync = Sync(job.priority)
-        event = filter + sync
-        event = TimeConstrained(event, jd_start, jd_end)
-        return event
-
-    raise ValueError(f"Unknown command {cmd}")
 
 
 @click.command()

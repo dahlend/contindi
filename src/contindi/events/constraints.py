@@ -20,6 +20,7 @@ class TimeConstrained(Event):
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
     ):
+        self.job_id = event.job_id
         self.start_time = start_time
         self.end_time = end_time
         self.event = event
@@ -30,7 +31,6 @@ class TimeConstrained(Event):
         # time limit.
         self.event.update(cxn, cache)
         self.status = self.event.status
-        self.msg = self.event.msg
         if self.status == EventStatus.Ready:
             cur_time = datetime.now(UTC)
             if self.start_time is not None and cur_time < self.start_time:
@@ -38,7 +38,9 @@ class TimeConstrained(Event):
             if self.end_time is not None and cur_time > self.end_time:
                 self.event.cancel(cxn, cache)
                 self.status = self.event.status
-                self.msg = "Event Ready after max time constraint met"
+                cache.update_job(
+                    self.job_id, "Event ready after max time constraint met"
+                )
 
     def trigger(self, cxn, cache):
         return self.event._trigger(cxn, cache)

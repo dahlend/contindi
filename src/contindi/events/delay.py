@@ -25,7 +25,6 @@ class Delay(Event):
 
     def cancel(self, _cxn, _cache):
         self.status = EventStatus.Failed
-        self.msg = "Canceled"
 
     def trigger(self, _cxn, _cache):
         self._end_time = datetime.now(UTC) + self.delay

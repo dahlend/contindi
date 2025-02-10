@@ -3,7 +3,6 @@ from collections import UserDict
 
 
 class Config(UserDict):
-
     @property
     def mount(self):
         return self["MOUNT"]
@@ -38,7 +37,7 @@ _DEFAULT_SETTINGS = dict(
     FOCUS="ZWO EAF",
     WHEEL="ZWO EFW",
     HOST=("localhost", 7624),
-    CACHE=None,
+    CACHE="http://127.0.0.1:8090",
 )
 
 
