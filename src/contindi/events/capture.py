@@ -5,12 +5,10 @@ from .base import Event, EventStatus
 
 
 class Capture(Event):
-    def __init__(self, job_name, duration, priority=0, keep=True, private=False):
+    def __init__(self, job_id, duration, priority=0):
         self.priority = priority
         self.duration = duration
-        self.keep = keep
-        self.private = private
-        self.job_name = job_name
+        self.job_id = job_id
         self.status = EventStatus.Ready
         self.timestamp = None
         self.max_time = duration + 5
@@ -24,17 +22,12 @@ class Capture(Event):
         if self.status == EventStatus.Running:
             cur_state = cxn[CONFIG.camera]["CCD1"]
             if self.timestamp != cur_state.timestamp:
-                self.status = EventStatus.Finished
-                if cache is None:
-                    self.msg = "No Cache found, image not saved."
-                    return
-                cache.add_frame(
-                    self.job_name,
-                    cur_state.elements["CCD1"].frame,
-                    solved=False,
-                    keep_frame=self.keep,
-                    private=self.private,
-                )
+                try:
+                    cache.add_frame(self.job_id, cur_state.elements["CCD1"].frame)
+                    self.status = EventStatus.Finished
+                except Exception as e:
+                    self.status = EventStatus.Failed
+                    self.msg = f"Failed to upload file! {e}"
 
     def trigger(self, cxn: Connection, _cache: Cache):
         """Trigger the beginning of the event."""
@@ -44,6 +37,6 @@ class Capture(Event):
 
     def __repr__(self):
         return (
-            f"Capture({self.job_name}, duration={self.duration}, "
+            f"Capture({self.job_id}, duration={self.duration}, "
             f"priority={self.priority}, keep={self.keep}, private={self.private})"
         )

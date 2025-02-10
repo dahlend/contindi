@@ -1,9 +1,8 @@
 import time
 import kete
 import click
-import os
 from .system import Connection
-from .cache import Cache, Job
+from .cache import Cache, Job, JobStatus
 from .events import EventStatus, Capture, SetFilter, Slew, TimeConstrained, Sync
 from .config import CONFIG
 
@@ -15,7 +14,7 @@ from .config import CONFIG
 @click.option("--wheel", default="iOptron CEM70", help="INDI Name of the filter wheel.")
 @click.option("--host", default="localhost", help="Address of the INDI server.")
 @click.option("--port", default=7624, help="Port of the INDI server.")
-@click.option("--cache", default="local_cache.db", help="Cache sqlite database.")
+@click.option("--cache", default="http://127.0.0.1:8090", help="Cache pocketbase url")
 def run_schedule(mount, camera, focus, wheel, host, port, cache):
     click.echo("Scheduler Running!")
 
@@ -40,11 +39,7 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
         if dev not in CONFIG.values():
             click.echo(f"\t{dev} not found in config")
 
-    cache_init = not os.path.isfile(cache)
     cache = Cache(cache)
-    if cache_init:
-        click.echo("New cache, initializing.")
-        cache.initialize()
 
     cxn.set_camera_recv(send_here="Also")
 
@@ -59,22 +54,24 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
         for job in jobs:
             if job.id in event_map:
                 continue
-            if job.status in ["FINISHED", "FAILED"]:
+            if job.status in [JobStatus.FINISHED, JobStatus.FAILED]:
                 continue
-            if job.status == "RUNNING":
-                job = job._replace(
-                    status="FAILED", msg="Job was running, but no event found."
+            if job.status == JobStatus.RUNNING:
+                cache.update_job(
+                    job.id,
+                    status=JobStatus.FAILED,
+                    msg="Job was running, but no event found.",
                 )
-                cache.update_job(job)
                 continue
             try:
                 event = parse_job(job)
             except Exception as e:
                 click.echo(f"JOB FAILED TO PARSE {str(job)} - {str(e)}")
-                job = job._replace(
-                    status="FAILED", msg=f"Failed to parse job: {str(e)}"
+                cache.update_job(
+                    job.id,
+                    status=JobStatus.FAILED,
+                    msg=f"Failed to parse job: {str(e)}",
                 )
-                cache.update_job(job)
                 continue
             event_map[job.id] = event
         event_map = {k: v for k, v in sorted(event_map.items(), key=lambda x: x[1])}
@@ -97,16 +94,14 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
 
             if status == EventStatus.Finished:
                 delete.append(job_id)
-                job = job._replace(status="FINISHED", msg=msg)
-                cache.update_job(job)
+                click.echo(f"Finished Job ID: {str(job_id)}")
+                cache.update_job(job.id, status=JobStatus.FINISHED, msg=msg)
             elif status == EventStatus.Failed:
                 delete.append(job_id)
-                job = job._replace(status="FAILED", msg=msg)
-                cache.update_job(job)
+                cache.update_job(job.id, status=JobStatus.FAILED, msg=msg)
             elif status == EventStatus.Running or status == EventStatus.Canceling:
-                if job.status != "RUNNING":
-                    job = job._replace(status="RUNNING", msg=msg)
-                    cache.update_job(job)
+                if job.status != JobStatus.RUNNING:
+                    cache.update_job(job.id, status=JobStatus.RUNNING, msg=msg)
             elif status == EventStatus.NotReady:
                 pass
             elif status == EventStatus.Ready and trigger is None:
@@ -122,8 +117,7 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
                 del event_map[trigger]
                 continue
             trigger = event_map[trigger]
-            job = job._replace(status="RUNNING", msg=msg)
-            cache.update_job(job)
+            cache.update_job(job.id, status=JobStatus.RUNNING, msg=msg)
             trigger._trigger(cxn, cache)
 
 
@@ -141,9 +135,7 @@ def parse_job(job: Job):
         event = Slew(ra, dec, job.priority)
         for filt in filters:
             filter = SetFilter(filt, job.priority)
-            capture = Capture(
-                job.job, job.duration, job.priority, keep=True, private=job.private
-            )
+            capture = Capture(job.id, job.duration, job.priority)
             event = event + filter + capture
         event = TimeConstrained(event, jd_start, jd_end)
         return event

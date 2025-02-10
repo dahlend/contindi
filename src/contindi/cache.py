@@ -1,52 +1,33 @@
-import sqlite3
-import kete
 import io
-import logging
-from collections import namedtuple
+import kete
 from astropy.io import fits
 from enum import Enum
+from pocketbase import Client
+from pocketbase.models import FileUpload
+from dataclasses import dataclass, field, fields, asdict
+from typing import Optional
+import logging
+import gzip
+
 
 logger = logging.getLogger(__name__)
 
 
 class SolveStatus(Enum):
-    Unsolved = 0  # Unsolved, but intended to be solved
-    Solved = 1
-    SolveFailed = 2
-    DontSolve = 3  # Temporary frame, may be deleted after a day (IE: focusing images)
+    UNSOVLED = 0  # Unsolved, but intended to be solved
+    SOLVED = 1
+    SOLVE_FAILED = 2
+    DONT_SOLVE = 3  # Temporary frame, may be deleted after a day (IE: focusing images)
 
 
-_CACHE_SQL = """
-/* This defines the schema for the cache database. */
+class JobStatus(Enum):
+    QUEUED = 0
+    RUNNING = 1
+    FAILED = 2
+    FINISHED = 3
 
-CREATE TABLE frames(
-    id INTEGER PRIMARY KEY,
-    job TEXT NOT NULL,
-    time REAL UNIQUE NOT NULL,
-    frame BLOB NOT NULL,
-    private INTEGER NOT NULL,
-    keep_frame BOOL NOT NULL,
-    duration REAL NOT NULL,
-    filter TEXT NOT NULL,
-    solved int NOT NULL
-);
 
-CREATE INDEX obs_time ON frames (time);
-
-CREATE TABLE job_queue(
-    id INTEGER PRIMARY KEY,
-    job TEXT NOT NULL,
-    cmd TEXT NOT NULL,
-    priority INTEGER NOT NULL,
-    private INTEGER NOT NULL,
-    duration REAL NOT NULL,
-    filter TEXT NOT NULL,
-    jd_start REAL NOT NULL,
-    jd_end REAL NOT NULL,
-    status TEXT NOT NULL DEFAULT "QUEUED",
-    msg TEXT DEFAULT NULL
-);
-
+"""
 /*
 Allowed cmd types:
 "FOCUS"
@@ -54,251 +35,140 @@ Allowed cmd types:
 "SYNC_INPLACE"
 "STATIC ra(deg) dec(deg)"
 "SSO_STATE desig jd x y z vx vy vz"
-
-
-Allowed status:
-"QUEUED"
-"RUNNING"
-"FAILED"
-"FINISHED"
-*/
 """
 
 
-FrameMeta = namedtuple(
-    "FrameMeta", "id, job, time, frame, private, keep_frame, duration, filter, solved"
-)
+@dataclass
+class Job:
+    id: str
+    cmd: str
+    priority: int
+    jd_end: Optional[float]
+    jd_start: Optional[float]
+    duration: float
+    filter: str
+    keep_frame: bool = field(default=True)
+    msg: str = field(default="")
+    status: JobStatus = field(default=JobStatus.QUEUED)
+    jd_obs: Optional[float] = field(default=None)
+    private: bool = field(default=False)
+    frame: Optional[str] = field(default=None)
+    solve: Optional[SolveStatus] = field(default=None)
 
+    @classmethod
+    def from_record(cls, client, record):
+        params = {k.name: getattr(record, k.name) for k in fields(cls)}
 
-Job = namedtuple(
-    "Job",
-    "id, job, cmd, priority, private, duration, filter, jd_start, jd_end, status, msg",
-)
+        url = client.files.get_url(record, record.frame)
+        params["frame"] = url
+        params["solve"] = SolveStatus[record.solve] if record.solve else None
+        params["status"] = JobStatus[record.status]
+        return cls(*params.values())
+
+    def get_frame(self) -> fits.HDUList:
+        return fits.open(self.frame)
+
+    @staticmethod
+    def new_static_exposure(
+        job_id, priority, jd_start, jd_end, ra, dec, duration, filter, private=False
+    ):
+        cmd = f"STATIC {ra} {dec}"
+        return Job(
+            id=job_id,
+            priority=priority,
+            jd_start=jd_start,
+            jd_end=jd_end,
+            duration=duration,
+            cmd=cmd,
+            filter=filter,
+            private=private,
+        )
+
+    asdict = asdict
 
 
 def fits_to_binary(frame):
-    with io.BytesIO() as f:
-        frame.writeto(f)
-        f.seek(0)
-        dat = f.read()
-    return dat
+    b = io.BytesIO()
+    f = gzip.GzipFile(fileobj=b, mode="wb")
+    frame.writeto(f)
+    b.seek(0)
+    return b
 
 
 class Cache:
-    def __init__(self, db_file="local_cache.db", timeout=10):
-        self.db_file = db_file
-        self.con = sqlite3.connect(self.db_file, timeout=timeout)
+    def __init__(self, host="http://127.0.0.1:8090"):
+        self.con = Client(host)
 
-    def initialize(self):
-        try:
-            with self.con:
-                self.con.executescript(_CACHE_SQL)
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-
-    def add_static_exposure(
-        self, priority, jd_start, jd_end, job, ra, dec, duration, filter, private=False
-    ):
-        cmd = f"STATIC {ra} {dec}"
-
-        try:
-            with self.con:
-                self.con.execute(
-                    """ INSERT INTO job_queue
-                                  (job, cmd, priority, private, duration, filter, jd_start, jd_end)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        job,
-                        cmd,
-                        priority,
-                        private,
-                        duration,
-                        filter,
-                        jd_start,
-                        jd_end,
-                    ),
-                )
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-            pass
-
-    def add_focus(self, priority, jd_start, jd_end, duration=1, filter=""):
-        try:
-            with self.con:
-                self.con.execute(
-                    """ INSERT INTO job_queue
-                                  (job, cmd, priority, private, duration, filter, jd_start, jd_end)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        "FOCUS",
-                        "FOCUS",
-                        priority,
-                        True,
-                        duration,
-                        filter,
-                        jd_start,
-                        jd_end,
-                    ),
-                )
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-            pass
-
-    def add_sync(self, priority, jd_start, jd_end, duration=3, filter=""):
-        try:
-            with self.con:
-                self.con.execute(
-                    """ INSERT INTO job_queue
-                                  (job, cmd, priority, private, duration, filter, jd_start, jd_end)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        "SYNC_INPLACE",
-                        "SYNC_INPLACE",
-                        priority,
-                        True,
-                        duration,
-                        filter,
-                        jd_start,
-                        jd_end,
-                    ),
-                )
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-            pass
-
-    def add_home(self, priority, jd_start, jd_end):
-        try:
-            with self.con:
-                self.con.execute(
-                    """ INSERT INTO job_queue
-                                  (job, cmd, priority, private, duration, filter, jd_start, jd_end)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        "HOME",
-                        "HOME",
-                        priority,
-                        True,
-                        0,
-                        "",
-                        jd_start,
-                        jd_end,
-                    ),
-                )
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-            pass
-
-    def get_jobs(self, status=None):
-        args = ", ".join([x for x in Job._fields])
-        if status is not None:
-            status = f"where status='{status}"
-        else:
-            status = ""
-        try:
-            with self.con:
-                res = self.con.execute(
-                    f"""Select {args}
-                    from job_queue {status} ORDER BY priority asc"""
-                ).fetchall()
-                if res is None:
-                    return None
-            return [Job(*r) for r in res]
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-
-    def get_job(self, id):
-        args = ", ".join([x for x in Job._fields])
-        try:
-            with self.con:
-                res = self.con.execute(
-                    f"""Select {args}
-                    from job_queue where id='{id}' ORDER BY priority asc"""
-                ).fetchone()
-                if res is None:
-                    return None
-            return Job(*res)
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-
-    def update_job(self, job: Job):
-        args = ", ".join([x + "=?" for x in Job._fields])
-
-        try:
-            with self.con:
-                self.con.execute(
-                    "UPDATE job_queue SET " + args + f" where id={job.id}", job
-                )
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-            pass
-
-    def delete_job(self, job: Job):
-        try:
-            with self.con:
-                self.con.execute(f"delete from job_queue where id={job.id};")
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-            pass
-
-    def add_frame(self, job, frame, solved, private=False, keep_frame=True):
-        dat = fits_to_binary(frame)
-        duration = frame.header["EXPTIME"]
-        filt = frame.header["FILTER"]
-        jd = kete.Time.from_iso(frame.header["DATE-OBS"] + "+00:00").utc_jd
-
-        data = (job, jd, dat, private, keep_frame, duration, filt, solved)
-
-        try:
-            with self.con:
-                self.con.execute(
-                    """ INSERT INTO frames
-                                  (job, time, frame, private, keep_frame, duration, filter, solved) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    data,
-                )
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-            pass
-
-    def get_latest_frame(self, where=None):
-        where = "" if where is None else where
-
-        try:
-            with self.con:
-                res = self.con.execute(
-                    f"Select * from frames {where} ORDER BY time desc LIMIT 1"
-                ).fetchone()
-                if res is None:
-                    return None
-                res = list(res)
-            res[3] = fits.HDUList.fromstring(res[3])[0]
-            res[8] = SolveStatus(res[8])
-            return FrameMeta(*res)
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-
-    def delete_frame(self, frame: FrameMeta):
-        cmd = f"delete from frames where id={frame.id};"
-        try:
-            with self.con:
-                self.con.execute(cmd)
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-            pass
-
-    def update_frame(self, frame: FrameMeta):
-        args = ", ".join([x + "=?" for x in FrameMeta._fields])
-        frame = frame._replace(
-            frame=fits_to_binary(frame.frame), solved=frame.solved.value
+    def get_jobs(self, filter="status='QUEUED'"):
+        records = self.con.collection("jobs").get_full_list(
+            query_params={"sort": "-priority", "filter": filter}
         )
+        return [Job.from_record(self.con, r) for r in records]
 
+    def get_job(self, job_id):
+        record = self.con.collection("jobs").get_one(job_id)
+        return Job.from_record(self.con, record)
+
+    def submit_job(self, job: Job):
+        params = job.asdict()
+        params["status"] = params["status"].name
+        if params["solve"] is not None:
+            params["solve"] = params["solve"].name
         try:
-            with self.con:
-                self.con.execute(
-                    "UPDATE frames SET " + args + f" where id={frame.id}", frame
-                )
-        except sqlite3.OperationalError as e:
-            logger.error(e)
-            pass
+            self.con.collection("jobs").create(params)
+        except Exception as e:
+            logger.error("Failed to submit job: %s", e.data)
+            raise
 
-    def __del__(self):
-        self.con.close()
+    def update_job(self, job_id, **kwargs):
+        if "status" in kwargs:
+            kwargs["status"] = kwargs["status"].name
+        if "solve" in kwargs and kwargs["solve"] is not None:
+            kwargs["solve"] = kwargs["solve"].name
+        if "id" in kwargs:
+            del kwargs["id"]
+        try:
+            self.con.collection("jobs").update(job_id, kwargs)
+        except Exception as e:
+            logger.error("Failed to submit job: %s", e.data)
+            raise
+
+    def add_frame(self, job_id, frame):
+        jd_obs = kete.Time.from_iso(frame.header["DATE-OBS"] + "+00:00").utc_jd
+        frame = fits_to_binary(frame)
+        try:
+            self.con.collection("jobs").update(
+                job_id,
+                {"jd_obs": jd_obs, "frame": FileUpload("frame.fits.gz", frame)},
+            )
+        except Exception as e:
+            logger.error("Failed to submit job: %s", e.data)
+            raise
+
+    # def delete_job(self, job: Job):
+    #     try:
+    #         with self.con:
+    #             self.con.execute(f"delete from job_queue where id={job.id};")
+    #     except sqlite3.OperationalError as e:
+    #         logger.error(e)
+    #         pass
+
+    # def get_latest_frame(self, where=None):
+    #     where = "" if where is None else where
+
+    #     try:
+    #         with self.con:
+    #             res = self.con.execute(
+    #                 f"Select * from frames {where} ORDER BY time desc LIMIT 1"
+    #             ).fetchone()
+    #             if res is None:
+    #                 return None
+    #             res = list(res)
+    #         res[3] = fits.HDUList.fromstring(res[3])[0]
+    #         res[8] = SolveStatus(res[8])
+    #         return FrameMeta(*res)
+    #     except sqlite3.OperationalError as e:
+    #         logger.error(e)
+
+    # def __del__(self):
+    #     self.con.close()
