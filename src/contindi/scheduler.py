@@ -48,16 +48,14 @@ def run_schedule(username, password, mount, camera, focus, wheel, host, port, ca
     event_map = {}
 
     running = None
-    last_time = time.time()
+    last_time = 0
 
     while True:
-        delay = abs(time.time() - last_time)
-        if delay < 1:
-            time.sleep(1 - delay)
+        if abs(time.time() - last_time) > 5:
+            jobs = cache.get_jobs(
+                filter="capture_status='QUEUED'", sort="-priority,-jd_end"
+            )
             last_time = time.time()
-        jobs = cache.get_jobs(
-            filter="capture_status='QUEUED'", sort="-priority,-jd_end"
-        )
 
         for job in jobs:
             if job.id in event_map:

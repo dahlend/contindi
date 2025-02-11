@@ -2,7 +2,6 @@ import io
 import kete
 from pocketbase import Client
 from pocketbase.models import FileUpload
-import logging
 import gzip
 import datetime
 import threading
@@ -41,9 +40,6 @@ class PostProcessingStatus(Enum):
     RUNNING = 1
     FAILED = 2
     FINISHED = 3
-
-
-logger = logging.getLogger(__name__)
 
 
 def fits_to_binary(frame):
@@ -150,29 +146,21 @@ class PBCache:
     def _jobs(self):
         try:
             return self.con.collection("jobs")
-        except Exception as e:
-            logger.error("Failed to fetch collection: %s", e.data)
+        except Exception:
             self.con = Client(self.host)
         return self.con.collection("jobs")
 
     def get_jobs(self, filter=None, sort="-priority"):
-        try:
-            records = self._jobs.get_full_list(
-                query_params={"sort": sort, "filter": filter}
-            )
-        except Exception as e:
-            logger.error("Failed to fetch jobs: %s", e.data)
-            raise
+        records = self._jobs.get_full_list(
+            query_params={"sort": sort, "filter": filter}
+        )
         return [Job.from_record(self.con, r) for r in records]
 
     def get_latest(self, filter="capture_status='FINISHED'", sort="-jd_obs"):
-        try:
-            record = self._jobs.get_first_list_item(
-                filter=filter, query_params={"sort": sort}
-            )
-        except Exception as e:
-            logger.error("Failed to fetch job: %s", e.data)
-            raise
+        record = self._jobs.get_first_list_item(
+            filter=filter, query_params={"sort": sort}
+        )
+
         return Job.from_record(self.con, record)
 
     def get_job(self, job_id):
@@ -184,11 +172,7 @@ class PBCache:
         params["capture_status"] = params["capture_status"].name
         if params["solve"] is not None:
             params["solve"] = params["solve"].name
-        try:
-            self.con.collection("jobs").create(params)
-        except Exception as e:
-            logger.error("Failed to submit job: %s", e.data)
-            raise
+        self.con.collection("jobs").create(params)
 
     def update_job(self, job_id, log=None, **kwargs):
         if log is not None:
@@ -202,11 +186,7 @@ class PBCache:
             kwargs["solve"] = kwargs["solve"].name
         if "id" in kwargs:
             del kwargs["id"]
-        try:
-            self._jobs.update(job_id, kwargs)
-        except Exception as e:
-            logger.error("Failed to submit job: %s", e.data)
-            raise
+        self._jobs.update(job_id, kwargs)
 
     def add_frame(self, job_id, frame):
         """
@@ -217,14 +197,10 @@ class PBCache:
         def _send(self, job_id, frame):
             jd_obs = kete.Time.from_iso(frame.header["DATE-OBS"] + "+00:00").utc_jd
             frame = fits_to_binary(frame)
-            try:
-                self._jobs.update(
-                    job_id,
-                    {"jd_obs": jd_obs, "frame": FileUpload("frame.fits.gz", frame)},
-                )
-            except Exception as e:
-                logger.error("Failed to submit job: %s", e.data)
-                raise
+            self._jobs.update(
+                job_id,
+                {"jd_obs": jd_obs, "frame": FileUpload("frame.fits.gz", frame)},
+            )
 
         sender = threading.Thread(target=_send, args=(self, job_id, frame))
         sender.start()
