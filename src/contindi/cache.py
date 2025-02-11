@@ -29,6 +29,7 @@ class CaptureStatus(Enum):
     RUNNING = 1
     FAILED = 3
     FINISHED = 4
+    EXPIRED = 5
 
 
 class PostProcessingStatus(Enum):
@@ -56,21 +57,33 @@ def fits_to_binary(frame):
 @dataclass
 class Job:
     id: str
-    proposal_id: str
+    proposal: str
     cmd: str
     priority: int
-    jd_end: Optional[float]
-    jd_start: Optional[float]
     duration: float
     filter: str
-    keep_frame: bool = field(default=True)
-    log: str = field(default="")
-    capture_status: CaptureStatus = field(default=CaptureStatus.QUEUED)
+    jd_start: Optional[float]
+    jd_end: Optional[float]
     jd_obs: Optional[float] = field(default=None)
-    private: bool = field(default=False)
-    frame: Optional[str] = field(default=None)
-    solve: Optional[SolveStatus] = field(default=None)
-    post_processing: Optional[PostProcessingStatus] = field(default=None)
+    keep_frame: bool = field(default=True, repr=False)
+    log: str = field(default="", repr=False)
+    capture_status: CaptureStatus = field(default=CaptureStatus.QUEUED, repr=False)
+    private: bool = field(default=False, repr=False)
+    frame: Optional[str] = field(default=None, repr=False)
+    solve: Optional[SolveStatus] = field(default=None, repr=False)
+    post_processing: Optional[PostProcessingStatus] = field(default=None, repr=False)
+    seeing: float = field(default=0, repr=False)
+    mag_limit: float = field(default=0, repr=False)
+    ra: float = field(default=0, repr=False)
+    dec: float = field(default=0, repr=False)
+    ra1: float = field(default=0, repr=False)
+    dec1: float = field(default=0, repr=False)
+    ra2: float = field(default=0, repr=False)
+    dec2: float = field(default=0, repr=False)
+    ra3: float = field(default=0, repr=False)
+    dec3: float = field(default=0, repr=False)
+    ra4: float = field(default=0, repr=False)
+    dec4: float = field(default=0, repr=False)
 
     @classmethod
     def from_record(cls, client, record):
@@ -88,7 +101,7 @@ class Job:
     @staticmethod
     def new_static_exposure(
         job_id,
-        proposal_id,
+        proposal,
         priority,
         jd_start,
         jd_end,
@@ -101,7 +114,7 @@ class Job:
         cmd = f"STATIC {ra} {dec}"
         return Job(
             id=job_id,
-            proposal_id=proposal_id,
+            proposal=proposal,
             priority=priority,
             jd_start=jd_start,
             jd_end=jd_end,
@@ -115,9 +128,23 @@ class Job:
 
 
 class PBCache:
-    def __init__(self, host="http://127.0.0.1:8090"):
+    def __init__(self, username, password, host="http://127.0.0.1:8090", admin=False):
         self.host = host
         self.con = Client(host)
+        self.username = username
+        self.password = password
+        self.admin = admin
+        self._auth()
+
+    def _auth(self):
+        if self.admin:
+            self.token = self.con.admins.auth_with_password(
+                self.username, self.password
+            )
+        else:
+            self.token = self.con.collection("users").auth_with_password(
+                self.username, self.password
+            )
 
     @property
     def _jobs(self):
@@ -128,7 +155,7 @@ class PBCache:
             self.con = Client(self.host)
         return self.con.collection("jobs")
 
-    def get_jobs(self, filter="capture_status='QUEUED'", sort="-priority"):
+    def get_jobs(self, filter=None, sort="-priority"):
         try:
             records = self._jobs.get_full_list(
                 query_params={"sort": sort, "filter": filter}

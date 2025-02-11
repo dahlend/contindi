@@ -1,5 +1,6 @@
 import time
 import click
+import kete
 from .connection import Connection
 from .config import CONFIG
 from .cache import PBCache, CaptureStatus
@@ -7,6 +8,8 @@ from .events import parse_job, EventStatus
 
 
 @click.command()
+@click.option("--username", help="Cache pocketbase admin username")
+@click.option("--password", help="Cache pocketbase admin password")
 @click.option("--mount", default="iOptron CEM70", help="INDI Name of the mount.")
 @click.option("--camera", default="ZWO CCD ASI533MM Pro", help="Name of the camera.")
 @click.option("--focus", default="iOptron CEM70", help="INDI Name of the focuser.")
@@ -14,7 +17,7 @@ from .events import parse_job, EventStatus
 @click.option("--host", default="localhost", help="Address of the INDI server.")
 @click.option("--port", default=7624, help="Port of the INDI server.")
 @click.option("--cache", default="http://127.0.0.1:8090", help="Cache pocketbase url")
-def run_schedule(mount, camera, focus, wheel, host, port, cache):
+def run_schedule(username, password, mount, camera, focus, wheel, host, port, cache):
     click.echo("Scheduler Running!")
 
     conf = dict(
@@ -38,17 +41,23 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
         if dev not in CONFIG.values():
             click.echo(f"\t{dev} not found in config")
 
-    cache = PBCache(cache)
+    cache = PBCache(username, password, cache, admin=True)
 
     cxn.set_camera_recv(send_here="Also")
 
     event_map = {}
 
     running = None
+    last_time = time.time()
 
     while True:
-        time.sleep(0.05)
-        jobs = cache.get_jobs()
+        delay = abs(time.time() - last_time)
+        if delay < 1:
+            time.sleep(1 - delay)
+            last_time = time.time()
+        jobs = cache.get_jobs(
+            filter="capture_status='QUEUED'", sort="-priority,-jd_end"
+        )
 
         for job in jobs:
             if job.id in event_map:
@@ -60,6 +69,13 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
                     job.id,
                     capture_status=CaptureStatus.FAILED,
                     log="Job was running, but no event found.",
+                )
+                continue
+            if job.jd_end and job.jd_end < kete.Time.now().utc_jd:
+                cache.update_job(
+                    job.id,
+                    capture_status=CaptureStatus.EXPIRED,
+                    log="Job did not run before its expiry time.",
                 )
                 continue
             try:
@@ -83,7 +99,7 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
             status = event.status
             job = cache.get_job(job_id)
             if job is None:
-                event_map[job_id].cancel(cxn, cache)
+                event_map[job_id]._cancel(cxn, cache)
                 delete.append(job_id)
                 continue
 
@@ -107,7 +123,16 @@ def run_schedule(mount, camera, focus, wheel, host, port, cache):
             elif status == EventStatus.NotReady:
                 pass
             elif status == EventStatus.Ready and trigger is None:
-                trigger = job_id
+                if job.jd_end and job.jd_end < kete.Time.now().utc_jd:
+                    cache.update_job(
+                        job.id,
+                        capture_status=CaptureStatus.EXPIRED,
+                        log="Job did not run before its expiry time.",
+                    )
+                    event_map[job_id]._cancel(cxn, cache)
+                    delete.append(job_id)
+                else:
+                    trigger = job_id
         for job_id in delete:
             del event_map[job_id]
 
