@@ -80,7 +80,7 @@ class Connection:
 
     timeout = 10
 
-    def __init__(self, host="localhost", port=7624):
+    def __init__(self, host="localhost", port=7624, max_messages=1000):
         """
         Parameters
         ----------
@@ -95,6 +95,8 @@ class Connection:
         self.response_queue = multiprocessing.Queue()
         self.message_queue = multiprocessing.Queue()
         self.process = None
+        self.messages = {}
+        self.max_messages = max_messages
         self.connect()
 
     def connect(self):
@@ -121,8 +123,13 @@ class Connection:
 
         # clear message queue
         while not self.message_queue.empty():
-            msg, dev, name = self.message_queue.get_nowait()
-            logger.error(f"{msg} - {dev} - {name}")
+            _, dev, message = self.message_queue.get_nowait()
+            logger.info(f"MESSAGE - {dev} - {message}")
+            if dev not in self.messages:
+                self.messages[dev] = []
+            self.messages[dev].insert(0, message)
+            if len(self.messages[dev]) > self.max_messages:
+                self.messages[dev] = self.messages[: self.max_messages]
 
         self.task_queue.put("get state")
         state = self.response_queue.get(timeout=self.timeout)
